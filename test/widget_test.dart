@@ -17,6 +17,7 @@ void main() {
     expect(find.text('Mulai'), findsOneWidget);
     expect(find.text('Deteksi otomatis'), findsOneWidget);
     expect(find.text('Edit AVD'), findsOneWidget);
+    expect(find.text('Hapus AVD'), findsOneWidget);
     expect(find.text('Buat AVD baru'), findsOneWidget);
     expect(find.text('Mode GPU saat dijalankan'), findsOneWidget);
   });

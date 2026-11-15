@@ -7,9 +7,19 @@ import 'package:path_provider/path_provider.dart';
 import 'settings_path_resolver.dart';
 
 class AppSettings {
-  const AppSettings({this.sdkPathOverride});
+  const AppSettings({
+    this.sdkPathOverride,
+    this.lastSelectedAvd,
+    this.coldBoot = false,
+    this.noAudio = false,
+    this.gpuLaunchMode = 'default',
+  });
 
   final String? sdkPathOverride;
+  final String? lastSelectedAvd;
+  final bool coldBoot;
+  final bool noAudio;
+  final String gpuLaunchMode;
 
   String? get trimmedOverride {
     final value = sdkPathOverride?.trim();
@@ -17,9 +27,30 @@ class AppSettings {
     return value;
   }
 
-  AppSettings copyWith({String? sdkPathOverride, bool clearOverride = false}) {
+  String? get trimmedLastAvd {
+    final value = lastSelectedAvd?.trim();
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  AppSettings copyWith({
+    String? sdkPathOverride,
+    bool clearOverride = false,
+    String? lastSelectedAvd,
+    bool clearLastSelectedAvd = false,
+    bool? coldBoot,
+    bool? noAudio,
+    String? gpuLaunchMode,
+  }) {
     return AppSettings(
-      sdkPathOverride: clearOverride ? null : (sdkPathOverride ?? this.sdkPathOverride),
+      sdkPathOverride:
+          clearOverride ? null : (sdkPathOverride ?? this.sdkPathOverride),
+      lastSelectedAvd: clearLastSelectedAvd
+          ? null
+          : (lastSelectedAvd ?? this.lastSelectedAvd),
+      coldBoot: coldBoot ?? this.coldBoot,
+      noAudio: noAudio ?? this.noAudio,
+      gpuLaunchMode: gpuLaunchMode ?? this.gpuLaunchMode,
     );
   }
 
@@ -29,13 +60,40 @@ class AppSettings {
     if (value != null) {
       map['sdkPathOverride'] = value;
     }
+    final lastAvd = trimmedLastAvd;
+    if (lastAvd != null) {
+      map['lastSelectedAvd'] = lastAvd;
+    }
+    if (coldBoot) {
+      map['coldBoot'] = true;
+    }
+    if (noAudio) {
+      map['noAudio'] = true;
+    }
+    if (gpuLaunchMode.isNotEmpty && gpuLaunchMode != 'default') {
+      map['gpuLaunchMode'] = gpuLaunchMode;
+    }
     return map;
   }
 
   factory AppSettings.fromJson(Map<String, dynamic>? json) {
     if (json == null) return const AppSettings();
-    final raw = json['sdkPathOverride'];
-    return AppSettings(sdkPathOverride: raw is String ? raw : null);
+    final rawOverride = json['sdkPathOverride'];
+    final rawLastAvd = json['lastSelectedAvd'];
+    final rawColdBoot = json['coldBoot'];
+    final rawNoAudio = json['noAudio'];
+    final rawGpuMode = json['gpuLaunchMode'];
+    const allowedGpu = {'default', 'auto', 'host', 'swiftshader_indirect'};
+    final gpu = (rawGpuMode is String && allowedGpu.contains(rawGpuMode))
+        ? rawGpuMode
+        : 'default';
+    return AppSettings(
+      sdkPathOverride: rawOverride is String ? rawOverride : null,
+      lastSelectedAvd: rawLastAvd is String ? rawLastAvd : null,
+      coldBoot: rawColdBoot is bool ? rawColdBoot : false,
+      noAudio: rawNoAudio is bool ? rawNoAudio : false,
+      gpuLaunchMode: gpu,
+    );
   }
 }
 

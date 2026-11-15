@@ -33,9 +33,9 @@ if errorlevel 1 exit /b 1
 
 if not exist "%ROOT%windows\flutter\ephemeral" mkdir "%ROOT%windows\flutter\ephemeral"
 
-rem If generated_config.cmake is missing, flutter build windows will write it
-rem even when the Visual Studio check later fails.
-if not exist "%ROOT%windows\flutter\ephemeral\generated_config.cmake" (
+rem If generated_config.cmake or flutter_windows.dll.lib is missing, flutter build windows
+rem will unpack ephemeral engine artifacts even when the Visual Studio check later fails.
+if not exist "%ROOT%windows\flutter\ephemeral\flutter_windows.dll.lib" (
   call flutter build windows --release
 )
 

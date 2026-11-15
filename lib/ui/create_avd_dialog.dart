@@ -139,8 +139,7 @@ class _CreateAvdDialogState extends State<CreateAvdDialog> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                // ignore: deprecated_member_use
-                value: widget.devices.contains(_deviceId) ? _deviceId : widget.devices.first,
+                initialValue: widget.devices.contains(_deviceId) ? _deviceId : widget.devices.first,
                 decoration: const InputDecoration(
                   labelText: 'Profil perangkat',
                   border: OutlineInputBorder(),
@@ -156,8 +155,7 @@ class _CreateAvdDialogState extends State<CreateAvdDialog> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                // ignore: deprecated_member_use
-                value: _packageId,
+                initialValue: _packageId,
                 decoration: const InputDecoration(
                   labelText: 'System image',
                   border: OutlineInputBorder(),
@@ -193,8 +191,7 @@ class _CreateAvdDialogState extends State<CreateAvdDialog> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                // ignore: deprecated_member_use
-                value: _gpuMode,
+                initialValue: _gpuMode,
                 decoration: const InputDecoration(
                   labelText: 'Mode GPU',
                   border: OutlineInputBorder(),

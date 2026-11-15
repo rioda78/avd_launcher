@@ -1,4 +1,4 @@
-﻿# AVD Launcher
+# AVD Launcher
 
 Aplikasi desktop Windows untuk memilih Android Virtual Device (AVD) dan menjalankannya.
 
@@ -40,12 +40,14 @@ Jika sebuah berkas sudah ada di salah satu lokasi itu, atau di lokasi lama `%APP
 
 ## Fitur
 
-- Daftar AVD dengan tombol Segarkan
-- Mulai AVD yang dipilih, tanpa jendela konsol qemu
-- Opsi boot dingin (`-no-snapshot-load`), hapus data (`-wipe-data`, dengan konfirmasi), tanpa audio (`-no-audio`), dan mode GPU (`-gpu auto|host|swiftshader_indirect`, atau memakai nilai di config AVD)
+- Daftar AVD dengan tombol Segarkan, menampilkan ringkasan spesifikasi (API, tag, ABI, RAM, penyimpanan), indikator status "Berjalan", dan peringatan jika system image hilang
+- Deteksi folder `.avd` yatim (tanpa berkas `.ini` pasangan) di `ANDROID_AVD_HOME`
+- Mulai AVD yang dipilih, tanpa jendela konsol qemu, serta melacak nomor seri emulator baru saat lebih dari satu emulator dijalankan
+- Opsi boot dingin (`-no-snapshot-load`), hapus data (`-wipe-data`, dengan konfirmasi), tanpa audio (`-no-audio`), dan mode GPU (`-gpu auto|host|swiftshader_indirect`, atau memakai nilai di config AVD). Preferensi pilihan AVD terakhir dan opsi jalankan disimpan otomatis di `settings.json`
 - Edit AVD: system image, RAM, penyimpanan internal, mode GPU, dan inti CPU. `config.ini` dicadangkan dengan cap waktu sebelum disimpan. AVD yang sedang berjalan tidak dapat diedit.
-- Buat AVD baru lewat `avdmanager` (jika Command-line Tools belum ada, aplikasi menampilkan cara memasangnya dan tidak menginstal otomatis)
-- Daftar perangkat `adb devices -l`, dan Hentikan untuk emulator (`adb -s emulator-XXXX emu kill`)
+- Buat AVD baru dan Hapus AVD lewat `avdmanager` (jika Command-line Tools belum ada, aplikasi menampilkan cara memasangnya dan tidak menginstal otomatis)
+- Pintasan untuk membuka folder `.avd` di Explorer dan membuka log emulator terakhir di Notepad
+- Daftar perangkat `adb devices -l` beserta nama AVD aslinya, tombol **Pasang APK** (`adb install -r`), tombol **Restart ADB**, dan **Hentikan** untuk emulator (`adb -s emulator-XXXX emu kill`)
 - Pesan kesalahan yang jelas jika SDK atau emulator tidak ditemukan
 
 Antarmuka memakai bahasa Indonesia.

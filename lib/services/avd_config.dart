@@ -343,7 +343,7 @@ bool isFileLockHeld(String path) {
   if (!file.existsSync()) return false;
   RandomAccessFile? handle;
   try {
-    handle = file.openSync(mode: FileMode.append);
+    handle = file.openSync(mode: FileMode.writeOnlyAppend);
     handle.lockSync(FileLock.exclusive);
     handle.unlockSync();
     return false;

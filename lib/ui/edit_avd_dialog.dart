@@ -107,8 +107,7 @@ class _EditAvdDialogState extends State<EditAvdDialog> {
                 const SizedBox(height: 16),
               ],
               DropdownButtonFormField<String>(
-                // ignore: deprecated_member_use
-                value: items.any((item) => item.value == _imageSysdir) ? _imageSysdir : null,
+                initialValue: items.any((item) => item.value == _imageSysdir) ? _imageSysdir : null,
                 decoration: const InputDecoration(
                   labelText: 'System image',
                   border: OutlineInputBorder(),
@@ -148,8 +147,7 @@ class _EditAvdDialogState extends State<EditAvdDialog> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                // ignore: deprecated_member_use
-                value: _gpuMode,
+                initialValue: _gpuMode,
                 decoration: const InputDecoration(
                   labelText: 'Mode GPU',
                   border: OutlineInputBorder(),

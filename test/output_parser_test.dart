@@ -81,4 +81,12 @@ adb: warning ignored
       expect(devices.single.extras['transport_id'], '1');
     });
   });
+
+  group('parseEmulatorAvdName', () {
+    test('membaca nama AVD dan mengabaikan OK', () {
+      expect(parseEmulatorAvdName('Pixel_7_API_34\r\nOK\r\n'), 'Pixel_7_API_34');
+      expect(parseEmulatorAvdName('OK\n'), isNull);
+      expect(parseEmulatorAvdName('KO: unknown command\n'), isNull);
+    });
+  });
 }

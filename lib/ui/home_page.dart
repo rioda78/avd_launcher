@@ -1,6 +1,7 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../models/adb_device.dart';
 import 'create_avd_dialog.dart';
 import 'edit_avd_dialog.dart';
 import 'launcher_controller.dart';
@@ -19,6 +20,12 @@ class HomePage extends StatelessWidget {
           appBar: AppBar(
             title: const Text('AVD Launcher'),
             actions: [
+              if (controller.lastEmulatorLogPath != null)
+                IconButton(
+                  tooltip: 'Buka log emulator terakhir',
+                  onPressed: controller.openLastEmulatorLog,
+                  icon: const Icon(Icons.article_outlined),
+                ),
               IconButton(
                 tooltip: 'Segarkan',
                 onPressed: controller.loading ? null : () => controller.refresh(),
@@ -50,6 +57,9 @@ class HomePage extends StatelessWidget {
                       _MessageBanner(
                         text: controller.statusMessage!,
                         tone: _BannerTone.info,
+                        onOpenLog: controller.lastEmulatorLogPath != null
+                            ? controller.openLastEmulatorLog
+                            : null,
                       ),
                     ],
                     if (controller.errorMessage != null) ...[
@@ -57,6 +67,9 @@ class HomePage extends StatelessWidget {
                       _MessageBanner(
                         text: controller.errorMessage!,
                         tone: _BannerTone.error,
+                        onOpenLog: controller.lastEmulatorLogPath != null
+                            ? controller.openLastEmulatorLog
+                            : null,
                       ),
                     ],
                   ],
@@ -159,6 +172,7 @@ class _AvdCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Card(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
@@ -192,12 +206,76 @@ class _AvdCard extends StatelessWidget {
                 child: Column(
                   children: [
                     for (final name in controller.avds)
-                      RadioListTile<String>(
-                        value: name,
-                        title: Text(name),
-                        dense: true,
+                      Builder(
+                        builder: (context) {
+                          final summary = controller.avdSummaries[name];
+                          final isRunning = controller.isAvdRunningByName(name);
+                          final subtitleParts = <String>[
+                            if (summary != null && summary.subtitle.isNotEmpty)
+                              summary.subtitle,
+                            if (summary != null && summary.imageMissing)
+                              'System image hilang',
+                          ];
+                          return RadioListTile<String>(
+                            value: name,
+                            title: Row(
+                              children: [
+                                Flexible(child: Text(name)),
+                                if (isRunning) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: scheme.primaryContainer,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      'Berjalan',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: scheme.onPrimaryContainer,
+                                          ),
+                                    ),
+                                  ),
+                                ],
+                                if (summary != null && summary.imageMissing) ...[
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    Icons.warning_amber_rounded,
+                                    size: 18,
+                                    color: scheme.error,
+                                  ),
+                                ],
+                              ],
+                            ),
+                            subtitle: subtitleParts.isEmpty
+                                ? null
+                                : Text(
+                                    subtitleParts.join(' · '),
+                                    style: summary != null && summary.imageMissing
+                                        ? TextStyle(color: scheme.error)
+                                        : null,
+                                  ),
+                            dense: true,
+                          );
+                        },
                       ),
                   ],
+                ),
+              ),
+            if (controller.orphanedAvds.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                child: Text(
+                  'Folder .avd tanpa berkas .ini terdeteksi: ${controller.orphanedAvds.join(', ')}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.tertiary,
+                      ),
                 ),
               ),
             Padding(
@@ -220,6 +298,19 @@ class _AvdCard extends StatelessWidget {
                     icon: const Icon(Icons.edit),
                     label: const Text('Edit AVD'),
                   ),
+                  OutlinedButton.icon(
+                    onPressed: controller.canDeleteSelected
+                        ? () => _confirmDeleteAvd(context)
+                        : null,
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Hapus AVD'),
+                  ),
+                  if (controller.selectedAvd != null)
+                    TextButton.icon(
+                      onPressed: controller.openSelectedAvdFolder,
+                      icon: const Icon(Icons.folder_outlined),
+                      label: const Text('Buka folder AVD'),
+                    ),
                 ],
               ),
             ),
@@ -227,6 +318,50 @@ class _AvdCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _confirmDeleteAvd(BuildContext context) async {
+    final name = controller.selectedAvd;
+    if (name == null || name.isEmpty) return;
+    if (controller.isAvdRunningByName(name)) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'AVD "$name" sedang berjalan. Hentikan emulator dulu sebelum menghapus.',
+            ),
+          ),
+        );
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Hapus AVD?'),
+          content: Text(
+            'Virtual device "$name" beserta seluruh data di dalamnya akan dihapus permanen. Lanjutkan?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError,
+              ),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Hapus'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
+    await controller.deleteSelectedAvd();
   }
 }
 
@@ -274,8 +409,8 @@ class _OptionsCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: DropdownButtonFormField<String>(
-                // ignore: deprecated_member_use
-                value: controller.gpuLaunchMode,
+                key: ValueKey<String>(controller.gpuLaunchMode),
+                initialValue: controller.gpuLaunchMode,
                 decoration: const InputDecoration(
                   labelText: 'Mode GPU saat dijalankan',
                   border: OutlineInputBorder(),
@@ -357,18 +492,30 @@ class _RunningCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
+        padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text(
-                'Emulator yang sedang berjalan',
-                style: Theme.of(context).textTheme.titleMedium,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Emulator yang sedang berjalan',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  if (controller.sdk.hasAdb)
+                    TextButton.icon(
+                      onPressed: controller.loading ? null : controller.restartAdb,
+                      icon: const Icon(Icons.restart_alt, size: 18),
+                      label: const Text('Restart ADB'),
+                    ),
+                ],
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             if (controller.devices.isEmpty)
               const Padding(
                 padding: EdgeInsets.fromLTRB(8, 4, 8, 12),
@@ -381,27 +528,55 @@ class _RunningCard extends StatelessWidget {
                   leading: Icon(
                     device.isEmulator ? Icons.smartphone : Icons.phone_android,
                   ),
-                  title: Text(device.serial),
+                  title: Text(device.displayTitle),
                   subtitle: Text([
                     device.state,
                     if (device.model != null && device.model!.isNotEmpty) device.model!,
                   ].join('  ·  ')),
-                  trailing: device.isEmulator
-                      ? OutlinedButton(
+                  trailing: Wrap(
+                    spacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (device.state == 'device')
+                        OutlinedButton.icon(
+                          onPressed: controller.installingApk || controller.loading
+                              ? null
+                              : () => _pickAndInstallApk(context, device),
+                          icon: const Icon(Icons.install_mobile, size: 16),
+                          label: const Text('Pasang APK'),
+                        ),
+                      if (device.isEmulator)
+                        OutlinedButton(
                           onPressed: controller.stopping || controller.loading
                               ? null
                               : () => controller.stopDevice(device),
                           child: const Text('Hentikan'),
                         )
-                      : Text(
+                      else
+                        Text(
                           'Perangkat fisik',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
+                    ],
+                  ),
                 ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _pickAndInstallApk(BuildContext context, AdbDevice device) async {
+    const typeGroup = XTypeGroup(
+      label: 'Berkas APK Android',
+      extensions: <String>['apk'],
+    );
+    final file = await openFile(
+      acceptedTypeGroups: const <XTypeGroup>[typeGroup],
+      confirmButtonText: 'Pasang',
+    );
+    if (file == null) return;
+    await controller.installApkOnDevice(device, file.path);
   }
 }
 
@@ -419,10 +594,15 @@ void _showSettingsSnackBar(BuildContext context, LauncherController controller) 
 enum _BannerTone { info, error }
 
 class _MessageBanner extends StatelessWidget {
-  const _MessageBanner({required this.text, required this.tone});
+  const _MessageBanner({
+    required this.text,
+    required this.tone,
+    this.onOpenLog,
+  });
 
   final String text;
   final _BannerTone tone;
+  final VoidCallback? onOpenLog;
 
   @override
   Widget build(BuildContext context) {
@@ -434,7 +614,22 @@ class _MessageBanner extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: SelectableText(text, style: TextStyle(color: fg)),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: SelectableText(text, style: TextStyle(color: fg)),
+            ),
+            if (onOpenLog != null) ...[
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: onOpenLog,
+                icon: const Icon(Icons.article_outlined, size: 18),
+                label: const Text('Buka Log'),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

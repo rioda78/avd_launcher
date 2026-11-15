@@ -53,6 +53,39 @@ class EmulatorLaunch {
   final String logPath;
 }
 
+class AvdSummary {
+  const AvdSummary({
+    required this.name,
+    this.api = '',
+    this.tag = '',
+    this.abi = '',
+    this.ramSize = '',
+    this.storageSize = '',
+    this.gpuMode = '',
+    this.imageMissing = false,
+  });
+
+  final String name;
+  final String api;
+  final String tag;
+  final String abi;
+  final String ramSize;
+  final String storageSize;
+  final String gpuMode;
+  final bool imageMissing;
+
+  String get subtitle {
+    final parts = <String>[
+      if (api.isNotEmpty) api,
+      if (tag.isNotEmpty) tag,
+      if (abi.isNotEmpty) abi,
+      if (ramSize.isNotEmpty) 'RAM $ramSize MB',
+      if (storageSize.isNotEmpty) 'Storage $storageSize',
+    ];
+    return parts.join(' · ');
+  }
+}
+
 class AvdConfigSnapshot {
   const AvdConfigSnapshot({
     required this.avdName,
@@ -98,7 +131,10 @@ class AvdService {
     return names;
   }
 
-  Future<List<AdbDevice>> listDevices(String adbPath) async {
+  Future<List<AdbDevice>> listDevices(
+    String adbPath, {
+    bool resolveAvdNames = true,
+  }) async {
     final result = await runner.run(
       adbPath,
       const ['devices', '-l'],
@@ -115,7 +151,145 @@ class AvdService {
         '${_detail(result)}',
       );
     }
-    return devices;
+    if (!resolveAvdNames) {
+      return devices;
+    }
+    final resolved = <AdbDevice>[];
+    for (final device in devices) {
+      if (device.isEmulator && device.state == 'device') {
+        final name = await resolveEmulatorAvdName(
+          adbPath: adbPath,
+          serial: device.serial,
+        );
+        resolved.add(device.copyWith(avdName: name));
+      } else {
+        resolved.add(device);
+      }
+    }
+    return resolved;
+  }
+
+  Future<String?> resolveEmulatorAvdName({
+    required String adbPath,
+    required String serial,
+  }) async {
+    try {
+      final emuResult = await runner.run(
+        adbPath,
+        ['-s', serial, 'emu', 'avd', 'name'],
+        timeout: const Duration(seconds: 5),
+      );
+      if (emuResult.exitCode == 0) {
+        final parsed = parseEmulatorAvdName(emuResult.stdout);
+        if (parsed != null && parsed.isNotEmpty) return parsed;
+      }
+    } catch (_) {}
+
+    try {
+      final propResult = await runner.run(
+        adbPath,
+        ['-s', serial, 'shell', 'getprop', 'ro.boot.qemu.avd_name'],
+        timeout: const Duration(seconds: 5),
+      );
+      if (propResult.exitCode == 0) {
+        final parsed = parseEmulatorAvdName(propResult.stdout);
+        if (parsed != null && parsed.isNotEmpty) return parsed;
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
+  AvdSummary? summarizeAvd({
+    required String avdName,
+    required String avdHome,
+    required String sdkRoot,
+  }) {
+    final directory = resolveAvdDirectory(
+      avdName: avdName,
+      avdHome: avdHome,
+      readFileIfExists: _readIfExists,
+    );
+    final configPath = p.join(directory, 'config.ini');
+    final content = _readIfExists(configPath);
+    if (content == null) return null;
+    final document = IniDocument.parse(content);
+    final sysdir = document.get('image.sysdir.1') ?? '';
+    final image = SystemImage.tryParseSysdir(sysdir);
+    final missing = sysdir.isNotEmpty &&
+        !Directory(p.normalize(p.join(sdkRoot, sysdir))).existsSync();
+    return AvdSummary(
+      name: avdName,
+      api: image?.api ?? '',
+      tag: image?.tag ?? '',
+      abi: image?.abi ?? '',
+      ramSize: document.get('hw.ramSize') ?? '',
+      storageSize: document.get('disk.dataPartition.size') ?? '',
+      gpuMode: document.get('hw.gpu.mode') ?? '',
+      imageMissing: missing,
+    );
+  }
+
+  List<String> findOrphanedAvdDirectories({
+    required String avdHome,
+    required Iterable<String> knownAvds,
+  }) {
+    final homeDir = Directory(avdHome);
+    if (!homeDir.existsSync()) return const [];
+    final knownLower = knownAvds.map((e) => e.toLowerCase()).toSet();
+    final orphaned = <String>[];
+    try {
+      for (final entity in homeDir.listSync()) {
+        if (entity is Directory && entity.path.toLowerCase().endsWith('.avd')) {
+          final base = p.basenameWithoutExtension(entity.path);
+          final iniFile = File(p.join(avdHome, '$base.ini'));
+          if (!iniFile.existsSync() && !knownLower.contains(base.toLowerCase())) {
+            orphaned.add(base);
+          }
+        }
+      }
+    } on FileSystemException {
+      return const [];
+    }
+    orphaned.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return orphaned;
+  }
+
+  Future<void> installApk({
+    required String adbPath,
+    required String serial,
+    required String apkPath,
+  }) async {
+    final result = await runner.run(
+      adbPath,
+      ['-s', serial, 'install', '-r', apkPath],
+      timeout: const Duration(minutes: 2),
+    );
+    if (result.exitCode != 0) {
+      throw AvdException(
+        'Gagal memasang APK pada $serial (kode ${result.exitCode}).'
+        '${_detail(result)}',
+      );
+    }
+  }
+
+  Future<void> restartAdbServer(String adbPath) async {
+    await runner.run(
+      adbPath,
+      const ['kill-server'],
+      timeout: const Duration(seconds: 15),
+    );
+    final start = await runner.run(
+      adbPath,
+      const ['start-server'],
+      timeout: const Duration(seconds: 20),
+    );
+    if (start.exitCode != 0) {
+      throw AvdException(
+        'Gagal menyalakan ulang server ADB (kode ${start.exitCode}).'
+        '${_detail(start)}',
+      );
+    }
   }
 
   Future<bool> isBootCompleted({

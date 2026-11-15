@@ -1,4 +1,5 @@
 import 'package:avd_launcher/services/settings_path_resolver.dart';
+import 'package:avd_launcher/services/settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
@@ -70,5 +71,22 @@ void main() {
       portable,
     ]);
     expect(unique.map((c) => c.directory).toList(), [local.directory, portable.directory]);
+  });
+
+  test('AppSettings menyimpan dan membaca preferensi lengkap', () {
+    const settings = AppSettings(
+      sdkPathOverride: r'E:\Android\Sdk',
+      lastSelectedAvd: 'Pixel_7',
+      coldBoot: true,
+      noAudio: true,
+      gpuLaunchMode: 'host',
+    );
+    final json = settings.toJson();
+    final restored = AppSettings.fromJson(json);
+    expect(restored.trimmedOverride, r'E:\Android\Sdk');
+    expect(restored.trimmedLastAvd, 'Pixel_7');
+    expect(restored.coldBoot, isTrue);
+    expect(restored.noAudio, isTrue);
+    expect(restored.gpuLaunchMode, 'host');
   });
 }

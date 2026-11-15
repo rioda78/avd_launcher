@@ -60,3 +60,17 @@ List<AdbDevice> parseAdbDevices(String output) {
   }
   return devices;
 }
+
+/// Parses stdout of `adb -s emulator-XXXX emu avd name` or `getprop ro.boot.qemu.avd_name`.
+String? parseEmulatorAvdName(String output) {
+  for (final raw in output.split(RegExp(r'\r?\n'))) {
+    final line = raw.trim();
+    if (line.isEmpty) continue;
+    final upper = line.toUpperCase();
+    if (upper == 'OK' || upper.startsWith('KO:') || upper.startsWith('ERROR')) {
+      continue;
+    }
+    return line;
+  }
+  return null;
+}

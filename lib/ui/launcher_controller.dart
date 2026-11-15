@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../models/adb_device.dart';
 import '../services/avd_config.dart';
 import '../services/avd_service.dart';
+import '../services/emulator_diagnostics.dart';
 import '../services/sdk_locator.dart';
 import '../services/settings_store.dart';
 
@@ -30,6 +31,8 @@ class LauncherController extends ChangeNotifier {
   AppSettings settings = const AppSettings();
   SdkLocation sdk = const SdkLocation(root: '', source: '');
   List<String> avds = const [];
+  Map<String, AvdSummary> avdSummaries = const {};
+  List<String> orphanedAvds = const [];
   List<AdbDevice> devices = const [];
   String? selectedAvd;
   bool coldBoot = false;
@@ -41,6 +44,8 @@ class LauncherController extends ChangeNotifier {
   bool stopping = false;
   bool editing = false;
   bool creating = false;
+  bool deleting = false;
+  bool installingApk = false;
   String? statusMessage;
   String? errorMessage;
   bool initialized = false;
@@ -59,7 +64,8 @@ class LauncherController extends ChangeNotifier {
       selectedAvd != null &&
       selectedAvd!.isNotEmpty &&
       !starting &&
-      !loading;
+      !loading &&
+      !deleting;
 
   bool get canEditSelected =>
       sdk.isUsable &&
@@ -68,9 +74,21 @@ class LauncherController extends ChangeNotifier {
       !starting &&
       !loading &&
       !editing &&
-      !creating;
+      !creating &&
+      !deleting;
 
-  bool get canCreateAvd => sdk.isUsable && !loading && !creating && !editing;
+  bool get canDeleteSelected =>
+      sdk.isUsable &&
+      selectedAvd != null &&
+      selectedAvd!.isNotEmpty &&
+      !starting &&
+      !loading &&
+      !editing &&
+      !creating &&
+      !deleting;
+
+  bool get canCreateAvd =>
+      sdk.isUsable && !loading && !creating && !editing && !deleting;
 
   Future<void> initialize() async {
     loading = true;
@@ -78,6 +96,10 @@ class LauncherController extends ChangeNotifier {
     notifyListeners();
     try {
       settings = await settingsStore.load();
+      coldBoot = settings.coldBoot;
+      noAudio = settings.noAudio;
+      gpuLaunchMode = settings.gpuLaunchMode;
+      selectedAvd = settings.trimmedLastAvd;
     } catch (error) {
       errorMessage = 'Gagal membaca pengaturan: $error';
     }
@@ -96,6 +118,8 @@ class LauncherController extends ChangeNotifier {
     sdk = locator.resolve(override: settings.trimmedOverride);
     if (!sdk.isUsable) {
       avds = const [];
+      avdSummaries = const {};
+      orphanedAvds = const [];
       devices = const [];
       if (sdk.issues.isNotEmpty) {
         errorMessage = sdk.errorMessage;
@@ -103,7 +127,11 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
-  Future<void> refresh({bool showLoading = true, bool preserveStatus = false}) async {
+  Future<void> refresh({
+    bool showLoading = true,
+    bool preserveStatus = false,
+    bool includeAvdList = true,
+  }) async {
     if (showLoading) {
       loading = true;
       if (!preserveStatus) {
@@ -121,13 +149,15 @@ class LauncherController extends ChangeNotifier {
 
     String? avdError;
     String? adbError;
-    var nextAvds = <String>[];
+    var nextAvds = avds;
     var nextDevices = <AdbDevice>[];
 
-    try {
-      nextAvds = await service.listAvds(sdk.emulatorPath!);
-    } catch (error) {
-      avdError = error.toString();
+    if (includeAvdList || avds.isEmpty) {
+      try {
+        nextAvds = await service.listAvds(sdk.emulatorPath!);
+      } catch (error) {
+        avdError = error.toString();
+      }
     }
     try {
       nextDevices = await service.listDevices(sdk.adbPath!);
@@ -137,11 +167,20 @@ class LauncherController extends ChangeNotifier {
 
     avds = nextAvds;
     devices = nextDevices;
+    if (includeAvdList || avdSummaries.isEmpty) {
+      _refreshSummariesAndOrphans();
+    }
+
     if (selectedAvd != null && !avds.contains(selectedAvd)) {
       selectedAvd = null;
     }
-    if (selectedAvd == null && avds.length == 1) {
-      selectedAvd = avds.first;
+    if (selectedAvd == null && avds.isNotEmpty) {
+      final preferred = settings.trimmedLastAvd;
+      if (preferred != null && avds.contains(preferred)) {
+        selectedAvd = preferred;
+      } else if (avds.length == 1) {
+        selectedAvd = avds.first;
+      }
     }
 
     final parts = <String>[
@@ -155,14 +194,41 @@ class LauncherController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _refreshSummariesAndOrphans() {
+    final home = _avdHome;
+    if (home == null || home.isEmpty || sdk.root.isEmpty) {
+      avdSummaries = const {};
+      orphanedAvds = const [];
+      return;
+    }
+    final nextSummaries = <String, AvdSummary>{};
+    for (final name in avds) {
+      final summary = service.summarizeAvd(
+        avdName: name,
+        avdHome: home,
+        sdkRoot: sdk.root,
+      );
+      if (summary != null) {
+        nextSummaries[name] = summary;
+      }
+    }
+    avdSummaries = nextSummaries;
+    orphanedAvds = service.findOrphanedAvdDirectories(
+      avdHome: home,
+      knownAvds: avds,
+    );
+  }
+
   void selectAvd(String? name) {
     selectedAvd = name;
     notifyListeners();
+    _savePreferencesQuietly();
   }
 
   void setColdBoot(bool value) {
     coldBoot = value;
     notifyListeners();
+    _savePreferencesQuietly();
   }
 
   void setWipeData(bool value) {
@@ -173,11 +239,26 @@ class LauncherController extends ChangeNotifier {
   void setNoAudio(bool value) {
     noAudio = value;
     notifyListeners();
+    _savePreferencesQuietly();
   }
 
   void setGpuLaunchMode(String value) {
     gpuLaunchMode = value;
     notifyListeners();
+    _savePreferencesQuietly();
+  }
+
+  void _savePreferencesQuietly() {
+    settings = settings.copyWith(
+      lastSelectedAvd: selectedAvd,
+      clearLastSelectedAvd: selectedAvd == null || selectedAvd!.isEmpty,
+      coldBoot: coldBoot,
+      noAudio: noAudio,
+      gpuLaunchMode: gpuLaunchMode,
+    );
+    unawaited(
+      settingsStore.save(settings).catchError((_) {}),
+    );
   }
 
   Future<void> setManualSdkPath(String? path) async {
@@ -224,13 +305,18 @@ class LauncherController extends ChangeNotifier {
     errorMessage = null;
     lastEmulatorLogPath = null;
     lastEmulatorPid = null;
-    statusMessage = 'Menyalakan ${selectedAvd!}…';
+    final targetAvd = selectedAvd!;
+    final previousEmulatorSerials = devices
+        .where((device) => device.isEmulator)
+        .map((device) => device.serial)
+        .toSet();
+    statusMessage = 'Menyalakan $targetAvd…';
     notifyListeners();
     try {
       final launch = await service.startAvd(
         emulatorPath: sdk.emulatorPath!,
         sdkRoot: sdk.root,
-        avdName: selectedAvd!,
+        avdName: targetAvd,
         avdHome: _avdHome,
         logDirectory: _logDirectory,
         options: LaunchOptions(
@@ -242,9 +328,13 @@ class LauncherController extends ChangeNotifier {
       );
       lastEmulatorPid = launch.pid;
       lastEmulatorLogPath = launch.logPath;
-      statusMessage = 'Menyalakan ${selectedAvd!}… (pid ${launch.pid})';
+      statusMessage = 'Menyalakan $targetAvd… (pid ${launch.pid})';
       notifyListeners();
-      await _watchLaunch(launch);
+      await _watchLaunch(
+        launch,
+        targetAvd: targetAvd,
+        previousSerials: previousEmulatorSerials,
+      );
     } catch (error) {
       errorMessage = error.toString();
       statusMessage = null;
@@ -254,15 +344,45 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
-  Future<void> _watchLaunch(EmulatorLaunch launch) async {
+  AdbDevice? _findTargetEmulator(
+    String targetAvd,
+    Set<String> previousSerials,
+  ) {
+    final emulators = devices.where((device) => device.isEmulator).toList();
+    if (emulators.isEmpty) return null;
+    final targetLower = targetAvd.toLowerCase();
+    for (final emu in emulators) {
+      if (emu.avdName != null && emu.avdName!.toLowerCase() == targetLower) {
+        return emu;
+      }
+    }
+    for (final emu in emulators) {
+      if (!previousSerials.contains(emu.serial)) {
+        return emu;
+      }
+    }
+    if (previousSerials.isEmpty) {
+      return emulators.first;
+    }
+    return null;
+  }
+
+  Future<void> _watchLaunch(
+    EmulatorLaunch launch, {
+    required String targetAvd,
+    required Set<String> previousSerials,
+  }) async {
     const interval = Duration(seconds: 3);
     const limit = Duration(minutes: 2);
     final deadline = DateTime.now().add(limit);
     while (DateTime.now().isBefore(deadline)) {
-      await refresh(showLoading: false, preserveStatus: true);
-      final emulators = devices.where((device) => device.isEmulator).toList();
-      if (emulators.isNotEmpty) {
-        final device = emulators.first;
+      await refresh(
+        showLoading: false,
+        preserveStatus: true,
+        includeAvdList: false,
+      );
+      final device = _findTargetEmulator(targetAvd, previousSerials);
+      if (device != null) {
         var booted = false;
         try {
           booted = await service.isBootCompleted(
@@ -271,11 +391,11 @@ class LauncherController extends ChangeNotifier {
           );
         } catch (_) {}
         if (booted) {
-          statusMessage = '${device.serial} online, sudah boot.';
+          statusMessage = '${device.displayTitle} online, sudah boot.';
           notifyListeners();
           return;
         }
-        statusMessage = '${device.serial} online, masih booting…';
+        statusMessage = '${device.displayTitle} online, masih booting…';
         notifyListeners();
       } else {
         final alive = await service.isProcessRunning(launch.pid);
@@ -286,16 +406,20 @@ class LauncherController extends ChangeNotifier {
           notifyListeners();
           return;
         }
-        statusMessage = 'Menyalakan ${selectedAvd!}… menunggu adb';
+        statusMessage = 'Menyalakan $targetAvd… menunggu adb';
         notifyListeners();
       }
       await Future<void>.delayed(interval);
     }
-    await refresh(showLoading: false, preserveStatus: true);
-    if (devices.any((device) => device.isEmulator)) {
-      final device = devices.firstWhere((device) => device.isEmulator);
+    await refresh(
+      showLoading: false,
+      preserveStatus: true,
+      includeAvdList: false,
+    );
+    final matched = _findTargetEmulator(targetAvd, previousSerials);
+    if (matched != null) {
       statusMessage =
-          '${device.serial} terdeteksi di adb, tetapi boot belum selesai dalam 2 menit. Log: ${launch.logPath}';
+          '${matched.displayTitle} terdeteksi di adb, tetapi boot belum selesai dalam 2 menit. Log: ${launch.logPath}';
     } else {
       errorMessage =
           'Emulator belum tampil di adb setelah 2 menit.\nLog: ${launch.logPath}';
@@ -324,11 +448,24 @@ class LauncherController extends ChangeNotifier {
     return null;
   }
 
+  bool isAvdRunningByName(String name) {
+    final lower = name.toLowerCase();
+    for (final device in devices) {
+      if (device.isEmulator &&
+          device.avdName != null &&
+          device.avdName!.toLowerCase() == lower) {
+        return true;
+      }
+    }
+    final home = _avdHome;
+    if (home == null || home.isEmpty) return false;
+    return service.isAvdRunning(avdName: name, avdHome: home);
+  }
+
   bool isSelectedAvdRunning() {
     final name = selectedAvd;
-    final home = _avdHome;
-    if (name == null || home == null || home.isEmpty) return false;
-    return service.isAvdRunning(avdName: name, avdHome: home);
+    if (name == null || name.isEmpty) return false;
+    return isAvdRunningByName(name);
   }
 
   AvdConfigSnapshot loadSelectedConfig() {
@@ -368,6 +505,7 @@ class LauncherController extends ChangeNotifier {
         gpuMode: gpuMode,
         cpuCores: cpuCores,
       );
+      _refreshSummariesAndOrphans();
       statusMessage = 'Konfigurasi "${snapshot.avdName}" disimpan. Cadangan: $backup';
       return backup;
     } catch (error) {
@@ -417,6 +555,7 @@ class LauncherController extends ChangeNotifier {
         existingNames: avds,
       );
       selectedAvd = name.trim();
+      _savePreferencesQuietly();
       statusMessage = 'AVD "$name" dibuat.';
       await refresh(showLoading: false, preserveStatus: true);
     } catch (error) {
@@ -429,11 +568,137 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
+  Future<void> deleteSelectedAvd() async {
+    final name = selectedAvd;
+    if (name == null || name.isEmpty) {
+      errorMessage = 'Pilih satu virtual device terlebih dahulu.';
+      notifyListeners();
+      return;
+    }
+    if (isAvdRunningByName(name)) {
+      errorMessage = 'AVD "$name" sedang berjalan. Hentikan emulator dulu sebelum menghapus.';
+      notifyListeners();
+      return;
+    }
+    deleting = true;
+    errorMessage = null;
+    statusMessage = 'Menghapus AVD "$name"…';
+    notifyListeners();
+    try {
+      await service.deleteAvd(
+        sdkRoot: sdk.root,
+        name: name,
+        avdHome: _avdHome,
+      );
+      selectedAvd = null;
+      _savePreferencesQuietly();
+      statusMessage = 'AVD "$name" dihapus.';
+      await refresh(showLoading: false, preserveStatus: true);
+    } catch (error) {
+      errorMessage = error.toString();
+      statusMessage = null;
+    } finally {
+      deleting = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> installApkOnDevice(AdbDevice device, String apkPath) async {
+    if (!sdk.hasAdb) {
+      errorMessage = 'adb.exe tidak ditemukan.';
+      notifyListeners();
+      return;
+    }
+    installingApk = true;
+    errorMessage = null;
+    statusMessage = 'Memasang ${p.basename(apkPath)} ke ${device.displayTitle}…';
+    notifyListeners();
+    try {
+      await service.installApk(
+        adbPath: sdk.adbPath!,
+        serial: device.serial,
+        apkPath: apkPath,
+      );
+      statusMessage = 'APK "${p.basename(apkPath)}" terpasang di ${device.displayTitle}.';
+    } catch (error) {
+      errorMessage = error.toString();
+      statusMessage = null;
+    } finally {
+      installingApk = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> restartAdb() async {
+    if (!sdk.hasAdb) {
+      errorMessage = 'adb.exe tidak ditemukan.';
+      notifyListeners();
+      return;
+    }
+    loading = true;
+    errorMessage = null;
+    statusMessage = 'Menyalakan ulang server ADB…';
+    notifyListeners();
+    try {
+      await service.restartAdbServer(sdk.adbPath!);
+      statusMessage = 'Server ADB dinyalakan ulang.';
+      await refresh(showLoading: false, preserveStatus: true, includeAvdList: false);
+    } catch (error) {
+      errorMessage = error.toString();
+      statusMessage = null;
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> openSelectedAvdFolder() async {
+    final name = selectedAvd;
+    final home = _avdHome;
+    if (name == null || home == null || home.isEmpty) return;
+    final dir = resolveAvdDirectory(
+      avdName: name,
+      avdHome: home,
+      readFileIfExists: (path) {
+        final f = File(path);
+        return f.existsSync() ? f.readAsStringSync() : null;
+      },
+    );
+    final target = Directory(dir).existsSync() ? dir : home;
+    if (Platform.isWindows) {
+      await Process.run('explorer.exe', [target]);
+    }
+  }
+
+  Future<void> openLastEmulatorLog() async {
+    final logPath = lastEmulatorLogPath;
+    if (logPath == null || logPath.isEmpty || !File(logPath).existsSync()) {
+      return;
+    }
+    if (Platform.isWindows) {
+      await Process.run('notepad.exe', [logPath]);
+    }
+  }
+
   void _startPeriodicRefresh() {
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (loading || starting || stopping || editing || creating) return;
-      unawaited(refresh(showLoading: false, preserveStatus: true));
+      if (loading ||
+          starting ||
+          stopping ||
+          editing ||
+          creating ||
+          deleting ||
+          installingApk) {
+        return;
+      }
+      unawaited(
+        refresh(
+          showLoading: false,
+          preserveStatus: true,
+          includeAvdList: false,
+        ),
+      );
     });
   }
 
@@ -451,13 +716,13 @@ class LauncherController extends ChangeNotifier {
     }
     stopping = true;
     errorMessage = null;
-    statusMessage = 'Menghentikan ${device.serial}…';
+    statusMessage = 'Menghentikan ${device.displayTitle}…';
     notifyListeners();
     try {
       await service.stopEmulator(adbPath: sdk.adbPath!, serial: device.serial);
-      statusMessage = '${device.serial} dihentikan.';
+      statusMessage = '${device.displayTitle} dihentikan.';
       await Future<void>.delayed(const Duration(seconds: 1));
-      await refresh(showLoading: false);
+      await refresh(showLoading: false, preserveStatus: true, includeAvdList: false);
     } catch (error) {
       errorMessage = error.toString();
       statusMessage = null;
