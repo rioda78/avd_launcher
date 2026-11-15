@@ -98,6 +98,11 @@ add_custom_command(
     ${FLUTTER_TOOL_ENVIRONMENT}
     "${FLUTTER_ROOT}/packages/flutter_tools/bin/tool_backend.bat"
       ${FLUTTER_TARGET_PLATFORM} $<CONFIG>
+  # tool_backend on some Flutter 3.50 installs leaves wrapper .cc files out of
+  # ephemeral; the Ninja fallback build needs them from the engine cache.
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${FLUTTER_ROOT}/bin/cache/artifacts/engine/windows-x64/cpp_client_wrapper"
+    "${WRAPPER_ROOT}"
   VERBATIM
 )
 add_custom_target(flutter_assemble DEPENDS

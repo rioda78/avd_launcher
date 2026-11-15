@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../models/adb_device.dart';
 import '../services/avd_config.dart';
 import '../services/avd_service.dart';
+import '../services/launch_watch.dart';
 import '../services/emulator_diagnostics.dart';
 import '../services/sdk_installer.dart';
 import '../services/sdk_locator.dart';
@@ -512,6 +513,15 @@ class LauncherController extends ChangeNotifier {
     return null;
   }
 
+  Future<void> _recoverAdbOnce(String reason) async {
+    if (!sdk.hasAdb) return;
+    statusMessage = reason;
+    notifyListeners();
+    try {
+      await service.recoverAdbConnection(sdk.adbPath!);
+    } catch (_) {}
+  }
+
   Future<void> _watchLaunch(
     EmulatorLaunch launch, {
     required String targetAvd,
@@ -519,7 +529,9 @@ class LauncherController extends ChangeNotifier {
   }) async {
     const interval = Duration(seconds: 3);
     const limit = Duration(minutes: 2);
-    final deadline = DateTime.now().add(limit);
+    final startedAt = DateTime.now();
+    final deadline = startedAt.add(limit);
+    var adbRetried = false;
     while (DateTime.now().isBefore(deadline)) {
       await refresh(
         showLoading: false,
@@ -551,6 +563,12 @@ class LauncherController extends ChangeNotifier {
           notifyListeners();
           return;
         }
+        final elapsed = DateTime.now().difference(startedAt);
+        if (!adbRetried && elapsed >= const Duration(seconds: 15) && sdk.hasAdb) {
+          adbRetried = true;
+          await _recoverAdbOnce('Menyalakan $targetAvd… menyalakan ulang server ADB');
+          continue;
+        }
         statusMessage = 'Menyalakan $targetAvd… menunggu adb';
         notifyListeners();
       }
@@ -561,15 +579,44 @@ class LauncherController extends ChangeNotifier {
       preserveStatus: true,
       includeAvdList: false,
     );
-    final matched = _findTargetEmulator(targetAvd, previousSerials);
+    var matched = _findTargetEmulator(targetAvd, previousSerials);
+    if (matched == null && sdk.hasAdb) {
+      if (!adbRetried) {
+        adbRetried = true;
+        await _recoverAdbOnce('Menyalakan ulang server ADB, lalu memeriksa emulator…');
+      }
+      await refresh(
+        showLoading: false,
+        preserveStatus: true,
+        includeAvdList: false,
+      );
+      matched = _findTargetEmulator(targetAvd, previousSerials);
+    }
     if (matched != null) {
       statusMessage =
           '${matched.displayTitle} terdeteksi di adb, tetapi boot belum selesai dalam 2 menit. Log: ${launch.logPath}';
-    } else {
-      errorMessage =
-          'Emulator belum tampil di adb setelah 2 menit.\nLog: ${launch.logPath}';
-      statusMessage = null;
+      errorMessage = null;
+      notifyListeners();
+      return;
     }
+    final alive = await service.isProcessRunning(launch.pid);
+    var windowVisible = false;
+    var adbPortOpen = false;
+    try {
+      windowVisible = await service.processTreeHasVisibleWindow(launch.pid);
+    } catch (_) {}
+    try {
+      adbPortOpen = await service.isEmulatorAdbPortOpen();
+    } catch (_) {}
+    final assessment = assessAdbWatchTimeout(
+      processAlive: alive,
+      windowVisible: windowVisible,
+      adbHasEmulator: false,
+      adbPortOpen: adbPortOpen,
+      logPath: launch.logPath,
+    );
+    errorMessage = assessment.errorMessage;
+    statusMessage = assessment.statusMessage;
     notifyListeners();
   }
 

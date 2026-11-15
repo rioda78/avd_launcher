@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'launch_watch.dart';
 import 'windows_hidden_process.dart';
 
 class ProcessCommandResult {
@@ -56,6 +57,12 @@ abstract class ProcessRunner {
   });
 
   Future<bool> isProcessRunning(int pid);
+
+  /// True if [pid] or a child process has a visible top-level window.
+  Future<bool> processTreeHasVisibleWindow(int pid);
+
+  /// True if a local TCP port is in LISTENING state (from netstat).
+  Future<bool> isLocalPortListening(int port);
 }
 
 class RealProcessRunner implements ProcessRunner {
@@ -223,5 +230,53 @@ class RealProcessRunner implements ProcessRunner {
     }
     final result = await Process.run('ps', ['-p', '$pid', '-o', 'pid=']);
     return result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty;
+  }
+
+  @override
+  Future<bool> processTreeHasVisibleWindow(int pid) async {
+    if (pid <= 0 || !Platform.isWindows) return false;
+    final script = '''
+\$ErrorActionPreference = 'SilentlyContinue'
+\$root = $pid
+\$ids = @(\$root)
+\$i = 0
+while (\$i -lt \$ids.Count) {
+  Get-CimInstance Win32_Process -Filter "ParentProcessId=\$(\$ids[\$i])" | ForEach-Object {
+    if (\$ids -notcontains \$_.ProcessId) { \$ids += \$_.ProcessId }
+  }
+  \$i++
+}
+\$titles = Get-Process -Id \$ids | Where-Object { \$_.MainWindowTitle -and \$_.MainWindowTitle.Trim() }
+if (\$titles) { \$titles[0].MainWindowTitle }
+''';
+    final result = await Process.run(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      stdoutEncoding: const SystemEncoding(),
+      stderrEncoding: const SystemEncoding(),
+    );
+    return result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty;
+  }
+
+  @override
+  Future<bool> isLocalPortListening(int port) async {
+    if (port <= 0) return false;
+    if (Platform.isWindows) {
+      final result = await Process.run(
+        'netstat',
+        ['-ano'],
+        stdoutEncoding: const SystemEncoding(),
+        stderrEncoding: const SystemEncoding(),
+      );
+      final out = result.stdout is String
+          ? result.stdout as String
+          : result.stdout.toString();
+      return netstatHasListeningPort(out, port);
+    }
+    final result = await Process.run('ss', ['-lnt']);
+    var out = result.stdout.toString();
+    if (out.contains(':$port ')) return true;
+    final fallback = await Process.run('netstat', ['-lnt']);
+    return fallback.stdout.toString().contains(':$port ');
   }
 }

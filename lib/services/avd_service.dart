@@ -6,6 +6,7 @@ import '../models/adb_device.dart';
 import 'avd_config.dart';
 import 'emulator_diagnostics.dart';
 import 'output_parser.dart';
+import 'launch_watch.dart';
 import 'process_runner.dart';
 
 class AvdException implements Exception {
@@ -446,6 +447,39 @@ class AvdService {
   }
 
   Future<bool> isProcessRunning(int pid) => runner.isProcessRunning(pid);
+
+  Future<bool> processTreeHasVisibleWindow(int pid) =>
+      runner.processTreeHasVisibleWindow(pid);
+
+  Future<bool> isEmulatorAdbPortOpen() async {
+    final left = await runner.isLocalPortListening(5555);
+    if (left) return true;
+    return runner.isLocalPortListening(5554);
+  }
+
+  /// Uses the given SDK [adbPath] only (never a random adb from PATH).
+  Future<bool> connectLocalEmulator(String adbPath) async {
+    final path = adbPath.trim();
+    if (path.isEmpty) return false;
+    final result = await runner.run(
+      path,
+      const ['connect', '127.0.0.1:5555'],
+      timeout: const Duration(seconds: 15),
+    );
+    final combined = '${result.stdout}\n${result.stderr}';
+    return parseAdbConnectSuccess(combined);
+  }
+
+  /// Restarts the SDK adb server once, then tries localhost:5555.
+  Future<void> recoverAdbConnection(String adbPath) async {
+    final path = adbPath.trim();
+    if (path.isEmpty) {
+      throw AvdException('adb.exe SDK tidak ditemukan.');
+    }
+    await restartAdbServer(path);
+    await connectLocalEmulator(path);
+  }
+
 
   bool isAvdRunning({required String avdName, required String avdHome}) {
     final directory = resolveAvdDirectory(

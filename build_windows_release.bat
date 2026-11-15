@@ -54,6 +54,13 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem Salin cpp_client_wrapper jika tool_backend tidak menuliskan berkas .cc.
+set "WRAPPER_SRC=%FLUTTER_ROOT%\bin\cache\artifacts\engine\windows-x64\cpp_client_wrapper"
+set "WRAPPER_DST=%ROOT%windows\flutter\ephemeral\cpp_client_wrapper"
+if exist "%WRAPPER_SRC%\standard_codec.cc" (
+  xcopy /E /I /Y "%WRAPPER_SRC%" "%WRAPPER_DST%" >nul
+)
+
 "%CMAKE%" --fresh -S "%ROOT%windows" -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM="%NINJA_DIR%\ninja.exe" -DFLUTTER_TARGET_PLATFORM=windows-x64
 if errorlevel 1 exit /b 1
 "%CMAKE%" --build "%BUILD_DIR%"
