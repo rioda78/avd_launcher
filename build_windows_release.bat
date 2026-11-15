@@ -28,7 +28,7 @@ call "%VCVARS%" x64
 if errorlevel 1 exit /b 1
 set "PATH=%NINJA_DIR%;%PATH%"
 
-flutter pub get
+call flutter pub get
 if errorlevel 1 exit /b 1
 
 if not exist "%ROOT%windows\flutter\ephemeral" mkdir "%ROOT%windows\flutter\ephemeral"
@@ -36,7 +36,7 @@ if not exist "%ROOT%windows\flutter\ephemeral" mkdir "%ROOT%windows\flutter\ephe
 rem If generated_config.cmake is missing, flutter build windows will write it
 rem even when the Visual Studio check later fails.
 if not exist "%ROOT%windows\flutter\ephemeral\generated_config.cmake" (
-  flutter build windows --release
+  call flutter build windows --release
 )
 
 set "FLUTTER_ROOT=C:\flutter"
@@ -63,9 +63,7 @@ if not exist "%RELEASE_DIR%\data" mkdir "%RELEASE_DIR%\data"
 copy /Y "%BUILD_DIR%\runner\avd_launcher.exe" "%RELEASE_DIR%\avd_launcher.exe" >nul
 copy /Y "%ROOT%windows\flutter\ephemeral\flutter_windows.dll" "%RELEASE_DIR%\" >nul
 copy /Y "%ROOT%windows\flutter\ephemeral\icudtl.dat" "%RELEASE_DIR%\data\" >nul
-if exist "%BUILD_DIR%\plugins\file_selector_windows\file_selector_windows_plugin.dll" (
-  copy /Y "%BUILD_DIR%\plugins\file_selector_windows\file_selector_windows_plugin.dll" "%RELEASE_DIR%\" >nul
-)
+for /R "%BUILD_DIR%\plugins" %%F in (*.dll) do copy /Y "%%F" "%RELEASE_DIR%\" >nul
 if exist "%ROOT%build\windows\app.so" copy /Y "%ROOT%build\windows\app.so" "%RELEASE_DIR%\data\app.so" >nul
 if exist "%ROOT%build\flutter_assets" (
   if exist "%RELEASE_DIR%\data\flutter_assets" rmdir /S /Q "%RELEASE_DIR%\data\flutter_assets"

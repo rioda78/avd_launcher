@@ -23,6 +23,14 @@ Hasil build yang sudah diverifikasi:
 
 Emulator dijalankan terpisah dari aplikasi. Menutup AVD Launcher tidak menghentikan emulator yang sudah mulai.
 
+Pengaturan (misalnya folder SDK manual) disimpan ke `settings.json` pada lokasi pertama yang dapat ditulisi, berurutan:
+
+- direktori dukungan aplikasi (`path_provider`)
+- `%LOCALAPPDATA%\AVD Launcher`
+- folder yang sama dengan `avd_launcher.exe` (portabel)
+
+Jika sebuah berkas sudah ada di salah satu lokasi itu, atau di lokasi lama `%APPDATA%\AVD Launcher`, aplikasi membacanya dari sana. Jalur berkas yang dipakai ditampilkan di jendela aplikasi.
+
 ## Fitur
 
 - Daftar AVD dengan tombol Segarkan

@@ -41,6 +41,10 @@ class LauncherController extends ChangeNotifier {
 
   String? get sdkOverrideText => settings.trimmedOverride;
 
+  String? get settingsFilePath => settingsStore.filePath;
+
+  String? get settingsLocationLabel => settingsStore.locationLabel;
+
   bool get canStart =>
       sdk.isUsable &&
       selectedAvd != null &&
@@ -156,9 +160,16 @@ class LauncherController extends ChangeNotifier {
       return;
     }
     errorMessage = null;
-    statusMessage = settings.trimmedOverride == null
-        ? 'Menggunakan deteksi otomatis lokasi SDK.'
-        : 'Lokasi SDK disimpan.';
+    final savedPath = settingsStore.filePath;
+    if (settings.trimmedOverride == null) {
+      statusMessage = savedPath == null
+          ? 'Menggunakan deteksi otomatis lokasi SDK.'
+          : 'Deteksi otomatis. Pengaturan disimpan di: $savedPath';
+    } else {
+      statusMessage = savedPath == null
+          ? 'Lokasi SDK disimpan.'
+          : 'Lokasi SDK disimpan di: $savedPath';
+    }
     await refresh();
   }
 

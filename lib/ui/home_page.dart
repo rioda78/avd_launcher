@@ -94,6 +94,18 @@ class _SdkCard extends StatelessWidget {
             SelectableText(pathText, style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 4),
             Text(sourceText, style: Theme.of(context).textTheme.bodySmall),
+            if (controller.settingsFilePath != null) ...[
+              const SizedBox(height: 8),
+              SelectableText(
+                'Berkas pengaturan: ${controller.settingsFilePath}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              if (controller.settingsLocationLabel != null)
+                Text(
+                  'Lokasi: ${controller.settingsLocationLabel}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -105,7 +117,14 @@ class _SdkCard extends StatelessWidget {
                   label: const Text('Pilih folder…'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: controller.loading ? null : controller.useAutomaticSdk,
+                  onPressed: controller.loading
+                      ? null
+                      : () async {
+                          await controller.useAutomaticSdk();
+                          if (context.mounted) {
+                            _showSettingsSnackBar(context, controller);
+                          }
+                        },
                   icon: const Icon(Icons.travel_explore),
                   label: const Text('Deteksi otomatis'),
                 ),
@@ -125,6 +144,9 @@ class _SdkCard extends StatelessWidget {
     );
     if (dir == null) return;
     await controller.setManualSdkPath(dir);
+    if (context.mounted) {
+      _showSettingsSnackBar(context, controller);
+    }
   }
 }
 
@@ -332,6 +354,18 @@ class _RunningCard extends StatelessWidget {
       ),
     );
   }
+}
+
+
+void _showSettingsSnackBar(BuildContext context, LauncherController controller) {
+  final path = controller.settingsFilePath;
+  final text = controller.errorMessage ??
+      (path == null
+          ? (controller.statusMessage ?? 'Pengaturan diperbarui.')
+          : 'Pengaturan disimpan di: $path');
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(text)));
 }
 
 enum _BannerTone { info, error }
