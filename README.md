@@ -23,6 +23,8 @@ Hasil build yang sudah diverifikasi:
 
 Emulator dijalankan terpisah dari aplikasi. Menutup AVD Launcher tidak menghentikan emulator yang sudah mulai.
 
+Saat Mulai, aplikasi meneruskan `ANDROID_SDK_ROOT`, `ANDROID_HOME`, dan `ANDROID_AVD_HOME`, menulis log emulator ke folder pengaturan, dan memantau `adb devices` sampai perangkat tampil atau prosesnya berhenti. Jika system image AVD tidak ada, pesan kesalahan ditampilkan tanpa menunggu.
+
 Pengaturan (misalnya folder SDK manual) disimpan ke `settings.json` pada lokasi pertama yang dapat ditulisi, berurutan:
 
 - direktori dukungan aplikasi (`path_provider`)

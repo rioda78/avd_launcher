@@ -12,6 +12,18 @@ class ProcessCommandResult {
   final String stderr;
 }
 
+class SpawnedProcess {
+  const SpawnedProcess({
+    required this.pid,
+    required this.stdout,
+    required this.stderr,
+  });
+
+  final int pid;
+  final Stream<List<int>> stdout;
+  final Stream<List<int>> stderr;
+}
+
 abstract class ProcessRunner {
   Future<ProcessCommandResult> run(
     String executable,
@@ -20,12 +32,14 @@ abstract class ProcessRunner {
     Map<String, String>? environment,
   });
 
-  Future<void> startDetached(
+  Future<SpawnedProcess> startDetachedWithStdio(
     String executable,
     List<String> arguments, {
     String? workingDirectory,
     Map<String, String>? environment,
   });
+
+  Future<bool> isProcessRunning(int pid);
 }
 
 class RealProcessRunner implements ProcessRunner {
@@ -56,20 +70,43 @@ class RealProcessRunner implements ProcessRunner {
   }
 
   @override
-  Future<void> startDetached(
+  Future<SpawnedProcess> startDetachedWithStdio(
     String executable,
     List<String> arguments, {
     String? workingDirectory,
     Map<String, String>? environment,
   }) async {
-    await Process.start(
+    final process = await Process.start(
       executable,
       arguments,
       workingDirectory: workingDirectory,
       environment: environment,
       includeParentEnvironment: true,
-      mode: ProcessStartMode.detached,
+      mode: ProcessStartMode.detachedWithStdio,
       runInShell: false,
     );
+    return SpawnedProcess(
+      pid: process.pid,
+      stdout: process.stdout,
+      stderr: process.stderr,
+    );
+  }
+
+  @override
+  Future<bool> isProcessRunning(int pid) async {
+    if (pid <= 0) return false;
+    if (Platform.isWindows) {
+      final result = await Process.run('tasklist', [
+        '/FI',
+        'PID eq $pid',
+        '/FO',
+        'CSV',
+        '/NH',
+      ]);
+      final out = result.stdout is String ? result.stdout as String : result.stdout.toString();
+      return out.contains('"$pid"');
+    }
+    final result = await Process.run('ps', ['-p', '$pid', '-o', 'pid=']);
+    return result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty;
   }
 }
