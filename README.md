@@ -6,8 +6,8 @@ Aplikasi desktop Windows untuk memilih Android Virtual Device (AVD) dan menjalan
 
 Gunakan salah satu lokasi resmi ini (keduanya menunjuk ke exe yang sama):
 
-- pintasan `AVD Launcher.lnk` di folder proyek `E:\proyek\avd_launcher`
-- `E:\proyek\avd_launcher\build\windows\x64\runner\Release\avd_launcher.exe`
+- pintasan `AVD Launcher.lnk` di folder utama proyek
+- `build\windows\x64\runner\Release\avd_launcher.exe`
 
 Jangan jalankan `build\windows\x64\runner\avd_launcher.exe` (tanpa folder Release). File itu adalah keluaran Ninja yang sering tidak disertai `data\app.so` dan DLL plugin terbaru, sehingga aplikasi memakai kode lama. Skrip build memindahkan file lepas itu ke `build\windows\x64\runner_stray_backup` dan memperbarui pintasan.
 
@@ -40,14 +40,17 @@ Jika sebuah berkas sudah ada di salah satu lokasi itu, atau di lokasi lama `%APP
 
 ## Fitur
 
+- **Antarmuka Multi-Tab & Panel Log di Sisi Kanan**:
+  - Tab **Virtual Device** dan **Perangkat ADB & SDK** di sisi kiri.
+  - **Panel Log** permanen di sebelah kanan dengan dua sub-tab: **Log Emulator** (menampilkan isi log proses `emulator-<nama>.log` secara langsung) dan **Log Aktivitas** (riwayat semua aksi, status, dan galat dengan cap waktu), lengkap dengan tombol muat ulang, salin ke clipboard, bersihkan log, dan buka di Notepad.
 - Daftar AVD dengan tombol Segarkan, menampilkan ringkasan spesifikasi (API, tag, ABI, RAM, penyimpanan), indikator status "Berjalan", dan peringatan jika system image hilang
 - **Unduh & Pasang Android SDK Otomatis**: Jika Android SDK atau komponennya belum ditemukan, tersedia tombol **Unduh & Pasang SDK Otomatis…** (atau **Unduh komponen SDK…**) yang secara otomatis mengunduh Android Command-line Tools dari Google, mengekstrak, menyetujui lisensi SDK, dan menginstal `platform-tools` (`adb.exe`), `emulator`, `platforms`, serta `system-images`
-- Deteksi folder `.avd` yatim (tanpa berkas `.ini` pasangan) di `ANDROID_AVD_HOME`
-- Pembersihan otomatis berkas kunci/status yang tertinggal (`hardware-qemu.ini.lock`, `multiinstance.lock`, `bootcompleted.ini`, `snapshot.trace`) serta menyalakan daemon ADB (`adb start-server`) sebelum emulator diluncurkan agar emulator tidak tertahan saat startup
+- Deteksi folder `.avd` yatim (tanpa berkas `.ini` pasangan) di `ANDROID_AVD_HOME` beserta tombol **Bersihkan**
+- Pembersihan otomatis berkas/direktori kunci yang tertinggal (`hardware-qemu.ini.lock`, `multiinstance.lock`, `userdata-qemu.img.lock`, `bootcompleted.ini`, `snapshot.trace`) serta menyalakan daemon ADB (`adb start-server`) sebelum emulator diluncurkan agar emulator tidak tertahan saat startup
 - Mulai AVD yang dipilih, tanpa jendela konsol qemu, serta melacak nomor seri emulator baru saat lebih dari satu emulator dijalankan
 - Opsi boot dingin (`-no-snapshot-load`), hapus data (`-wipe-data`, dengan konfirmasi), tanpa audio (`-no-audio`), dan mode GPU (`-gpu auto|host|swiftshader_indirect`, atau memakai nilai di config AVD). Preferensi pilihan AVD terakhir dan opsi jalankan disimpan otomatis di `settings.json`
 - Edit AVD: system image, RAM, penyimpanan internal, mode GPU, dan inti CPU. `config.ini` dicadangkan dengan cap waktu sebelum disimpan. AVD yang sedang berjalan tidak dapat diedit.
-- Buat AVD baru dan Hapus AVD lewat `avdmanager`
+- Buat AVD baru lewat `avdmanager` dan Hapus AVD (menjalankan `avdmanager delete avd` sekaligus membersihkan langsung berkas `<nama>.ini` dan folder `<nama>.avd` agar AVD yang system image-nya hilang pun tetap terhapus bersih)
 - Pintasan untuk membuka folder `.avd` di Explorer dan membuka log emulator terakhir di Notepad
 - Daftar perangkat `adb devices -l` beserta nama AVD aslinya, tombol **Pasang APK** (`adb install -r`), tombol **Restart ADB**, dan **Hentikan** untuk emulator (`adb -s emulator-XXXX emu kill`)
 - Pesan kesalahan yang jelas jika SDK atau emulator tidak ditemukan
@@ -57,7 +60,6 @@ Antarmuka memakai bahasa Indonesia.
 ## Tes
 
 ```bat
-cd /d E:\proyek\avd_launcher
 flutter test
 ```
 
@@ -68,7 +70,6 @@ Diperlukan Flutter (channel stable) serta MSVC, CMake, Ninja, dan Windows SDK.
 `flutter build windows --release` akan gagal jika Visual Studio tercatat tidak lengkap (misalnya pembaruan yang dibatalkan, sehingga `isComplete`/`isLaunchable` bernilai false). Di mesin itu, gunakan:
 
 ```bat
-cd /d E:\proyek\avd_launcher
 build_windows_release.bat
 ```
 

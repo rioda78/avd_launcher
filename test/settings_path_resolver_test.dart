@@ -4,10 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
-  const support = SettingsCandidate(r'C:\Users\x\AppData\Roaming\id.rioda\AVD Launcher', 'direktori dukungan aplikasi');
-  const local = SettingsCandidate(r'C:\Users\x\AppData\Local\AVD Launcher', r'%LOCALAPPDATA%\AVD Launcher');
-  const portable = SettingsCandidate(r'E:\proyek\avd_launcher\build\Release', 'folder aplikasi (portabel)');
-  const legacy = SettingsCandidate(r'C:\Users\x\AppData\Roaming\AVD Launcher', r'%APPDATA%\AVD Launcher');
+  const support = SettingsCandidate(r'C:\Users\user\AppData\Roaming\example\AVD Launcher', 'direktori dukungan aplikasi');
+  const local = SettingsCandidate(r'C:\Users\user\AppData\Local\AVD Launcher', r'%LOCALAPPDATA%\AVD Launcher');
+  const portable = SettingsCandidate(r'C:\apps\avd_launcher\Release', 'folder aplikasi (portabel)');
+  const legacy = SettingsCandidate(r'C:\Users\user\AppData\Roaming\AVD Launcher', r'%APPDATA%\AVD Launcher');
 
   SettingsPathResolver resolver({
     Set<String> writable = const {},

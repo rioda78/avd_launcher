@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:avd_launcher/app.dart';
 import 'package:avd_launcher/services/avd_service.dart';
 import 'package:avd_launcher/services/sdk_locator.dart';
@@ -7,6 +9,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets('menampilkan judul, Mulai, Edit AVD, dan Buat AVD baru', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1180, 780));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final controller = LauncherController(
       settingsStore: SettingsStore(filePath: 'settings-test-unused.json'),
       service: AvdService(),
@@ -14,6 +18,11 @@ void main() {
     );
     await tester.pumpWidget(AvdLauncherApp(controller: controller));
     expect(find.text('AVD Launcher'), findsOneWidget);
+    expect(find.text('Virtual Device'), findsWidgets);
+    expect(find.text('Perangkat ADB & SDK'), findsOneWidget);
+    expect(find.text('Panel Log'), findsOneWidget);
+    expect(find.text('Log Emulator'), findsOneWidget);
+    expect(find.text('Log Aktivitas'), findsOneWidget);
     expect(find.text('Mulai'), findsOneWidget);
     expect(find.text('Deteksi otomatis'), findsOneWidget);
     expect(find.text('Edit AVD'), findsOneWidget);

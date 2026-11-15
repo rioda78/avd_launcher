@@ -51,12 +51,102 @@ class LauncherController extends ChangeNotifier {
   bool deleting = false;
   bool installingApk = false;
   bool installingSdk = false;
-  String? statusMessage;
-  String? errorMessage;
   bool initialized = false;
   String? lastEmulatorLogPath;
   int? lastEmulatorPid;
+  String emulatorLogContent = '';
+  final List<String> activityLogs = <String>[];
+  String? _statusMessage;
+  String? _errorMessage;
   Timer? _refreshTimer;
+
+  String? get statusMessage => _statusMessage;
+  set statusMessage(String? value) {
+    final changed = value != _statusMessage;
+    _statusMessage = value;
+    if (changed && value != null && value.trim().isNotEmpty) {
+      addActivityLog('[INFO] $value');
+    }
+  }
+
+  String? get errorMessage => _errorMessage;
+  set errorMessage(String? value) {
+    final changed = value != _errorMessage;
+    _errorMessage = value;
+    if (changed && value != null && value.trim().isNotEmpty) {
+      addActivityLog('[ERROR] $value');
+    }
+  }
+
+  void addActivityLog(String entry) {
+    final now = DateTime.now();
+    final hh = now.hour.toString().padLeft(2, '0');
+    final mm = now.minute.toString().padLeft(2, '0');
+    final ss = now.second.toString().padLeft(2, '0');
+    activityLogs.add('[$hh:$mm:$ss] $entry');
+    if (activityLogs.length > 500) {
+      activityLogs.removeRange(0, activityLogs.length - 500);
+    }
+  }
+
+  void clearActivityLogs() {
+    activityLogs.clear();
+    notifyListeners();
+  }
+
+  String? get activeEmulatorLogPath {
+    if (lastEmulatorLogPath != null && lastEmulatorLogPath!.isNotEmpty) {
+      return lastEmulatorLogPath;
+    }
+    final name = selectedAvd;
+    final dir = _logDirectory;
+    if (name != null && name.isNotEmpty && dir != null && dir.isNotEmpty) {
+      final candidate = p.join(dir, 'emulator-${sanitizeForFileName(name)}.log');
+      if (File(candidate).existsSync()) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  Future<void> refreshEmulatorLogContent({bool notify = true}) async {
+    final path = activeEmulatorLogPath;
+    if (path == null || path.isEmpty) {
+      if (emulatorLogContent.isNotEmpty) {
+        emulatorLogContent = '';
+        if (notify) notifyListeners();
+      }
+      return;
+    }
+    try {
+      final file = File(path);
+      if (!await file.exists()) {
+        if (emulatorLogContent.isNotEmpty) {
+          emulatorLogContent = '';
+          if (notify) notifyListeners();
+        }
+        return;
+      }
+      final text = await file.readAsString();
+      if (text != emulatorLogContent) {
+        emulatorLogContent = text;
+        if (notify) notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> clearEmulatorLog() async {
+    final path = activeEmulatorLogPath;
+    if (path == null || path.isEmpty) return;
+    try {
+      final file = File(path);
+      if (await file.exists()) {
+        await file.writeAsString('');
+      }
+      emulatorLogContent = '';
+      notifyListeners();
+    } catch (_) {}
+  }
 
   String? get sdkOverrideText => settings.trimmedOverride;
 
@@ -195,6 +285,7 @@ class LauncherController extends ChangeNotifier {
     if (!preserveStatus) {
       errorMessage = parts.isEmpty ? null : parts.join('\n');
     }
+    await refreshEmulatorLogContent(notify: false);
     loading = false;
     notifyListeners();
   }
@@ -226,6 +317,7 @@ class LauncherController extends ChangeNotifier {
 
   void selectAvd(String? name) {
     selectedAvd = name;
+    unawaited(refreshEmulatorLogContent(notify: false));
     notifyListeners();
     _savePreferencesQuietly();
   }
@@ -372,6 +464,7 @@ class LauncherController extends ChangeNotifier {
       );
       lastEmulatorPid = launch.pid;
       lastEmulatorLogPath = launch.logPath;
+      await refreshEmulatorLogContent(notify: false);
       statusMessage = 'Menyalakan $targetAvd… (pid ${launch.pid})';
       notifyListeners();
       await _watchLaunch(
@@ -382,6 +475,7 @@ class LauncherController extends ChangeNotifier {
     } catch (error) {
       errorMessage = error.toString();
       statusMessage = null;
+      await refreshEmulatorLogContent(notify: false);
     } finally {
       starting = false;
       notifyListeners();
@@ -652,6 +746,32 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
+  Future<void> deleteAllOrphanedAvds() async {
+    final home = _avdHome;
+    if (home == null || home.isEmpty || orphanedAvds.isEmpty) return;
+    deleting = true;
+    errorMessage = null;
+    final targets = List<String>.from(orphanedAvds);
+    statusMessage = 'Membersihkan folder .avd yatim (${targets.join(', ')})…';
+    notifyListeners();
+    try {
+      for (final name in targets) {
+        await service.deleteOrphanedAvdDirectory(
+          avdHome: home,
+          baseName: name,
+        );
+      }
+      statusMessage = 'Folder .avd yatim berhasil dibersihkan.';
+      await refresh(showLoading: false, preserveStatus: true);
+    } catch (error) {
+      errorMessage = 'Gagal membersihkan folder .avd yatim: $error';
+      statusMessage = null;
+    } finally {
+      deleting = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> installApkOnDevice(AdbDevice device, String apkPath) async {
     if (!sdk.hasAdb) {
       errorMessage = 'adb.exe tidak ditemukan.';
@@ -720,7 +840,7 @@ class LauncherController extends ChangeNotifier {
   }
 
   Future<void> openLastEmulatorLog() async {
-    final logPath = lastEmulatorLogPath;
+    final logPath = activeEmulatorLogPath;
     if (logPath == null || logPath.isEmpty || !File(logPath).existsSync()) {
       return;
     }

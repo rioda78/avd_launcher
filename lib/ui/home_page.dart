@@ -1,5 +1,6 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/adb_device.dart';
 import 'create_avd_dialog.dart';
@@ -17,69 +18,321 @@ class HomePage extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('AVD Launcher'),
-            actions: [
-              if (controller.lastEmulatorLogPath != null)
+        return DefaultTabController(
+          length: 2,
+          child: Scaffold(
+            appBar: AppBar(
+              title: const Text('AVD Launcher'),
+              actions: [
+                if (controller.activeEmulatorLogPath != null)
+                  IconButton(
+                    tooltip: 'Buka log emulator di Notepad',
+                    onPressed: controller.openLastEmulatorLog,
+                    icon: const Icon(Icons.open_in_new),
+                  ),
                 IconButton(
-                  tooltip: 'Buka log emulator terakhir',
-                  onPressed: controller.openLastEmulatorLog,
-                  icon: const Icon(Icons.article_outlined),
+                  tooltip: 'Segarkan',
+                  onPressed:
+                      controller.loading ? null : () => controller.refresh(),
+                  icon: const Icon(Icons.refresh),
                 ),
-              IconButton(
-                tooltip: 'Segarkan',
-                onPressed: controller.loading ? null : () => controller.refresh(),
-                icon: const Icon(Icons.refresh),
+              ],
+              bottom: const TabBar(
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                tabs: [
+                  Tab(
+                    icon: Icon(Icons.phone_android),
+                    text: 'Virtual Device',
+                  ),
+                  Tab(
+                    icon: Icon(Icons.settings_applications),
+                    text: 'Perangkat ADB & SDK',
+                  ),
+                ],
               ),
-            ],
-          ),
-          body: Column(
-            children: [
-              if (controller.loading) const LinearProgressIndicator(minHeight: 2),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                  children: [
-                    Text(
-                      'Pilih virtual device Android, lalu jalankan emulator.',
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                    const SizedBox(height: 16),
-                    _SdkCard(controller: controller),
-                    const SizedBox(height: 16),
-                    _AvdCard(controller: controller),
-                    const SizedBox(height: 16),
-                    _OptionsCard(controller: controller),
-                    const SizedBox(height: 16),
-                    _RunningCard(controller: controller),
-                    if (controller.statusMessage != null) ...[
-                      const SizedBox(height: 16),
-                      _MessageBanner(
-                        text: controller.statusMessage!,
-                        tone: _BannerTone.info,
-                        onOpenLog: controller.lastEmulatorLogPath != null
-                            ? controller.openLastEmulatorLog
-                            : null,
-                      ),
-                    ],
-                    if (controller.errorMessage != null) ...[
-                      const SizedBox(height: 16),
-                      _MessageBanner(
-                        text: controller.errorMessage!,
-                        tone: _BannerTone.error,
-                        onOpenLog: controller.lastEmulatorLogPath != null
-                            ? controller.openLastEmulatorLog
-                            : null,
-                      ),
-                    ],
-                  ],
+            ),
+            body: Column(
+              children: [
+                if (controller.loading || controller.installingSdk)
+                  const LinearProgressIndicator(minHeight: 2),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final wide = constraints.maxWidth >= 780;
+                      final leftPane = TabBarView(
+                        children: [
+                          _VirtualDeviceTab(controller: controller),
+                          _AdbAndSdkTab(controller: controller),
+                        ],
+                      );
+                      final rightPane = _LogSidePanel(controller: controller);
+
+                      if (wide) {
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(
+                              flex: 11,
+                              child: leftPane,
+                            ),
+                            const VerticalDivider(width: 1, thickness: 1),
+                            Expanded(
+                              flex: 9,
+                              child: rightPane,
+                            ),
+                          ],
+                        );
+                      }
+
+                      return Column(
+                        children: [
+                          Expanded(
+                            flex: 6,
+                            child: leftPane,
+                          ),
+                          const Divider(height: 1, thickness: 1),
+                          Expanded(
+                            flex: 4,
+                            child: rightPane,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
+    );
+  }
+}
+
+class _VirtualDeviceTab extends StatelessWidget {
+  const _VirtualDeviceTab({required this.controller});
+
+  final LauncherController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      children: [
+        Text(
+          'Pilih virtual device Android, lalu jalankan emulator.',
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+        const SizedBox(height: 16),
+        if (!controller.sdk.isUsable) ...[
+          _SdkCard(controller: controller),
+          const SizedBox(height: 16),
+        ],
+        _AvdCard(controller: controller),
+        const SizedBox(height: 16),
+        _OptionsCard(controller: controller),
+        if (controller.statusMessage != null) ...[
+          const SizedBox(height: 16),
+          _MessageBanner(
+            text: controller.statusMessage!,
+            tone: _BannerTone.info,
+          ),
+        ],
+        if (controller.errorMessage != null) ...[
+          const SizedBox(height: 16),
+          _MessageBanner(
+            text: controller.errorMessage!,
+            tone: _BannerTone.error,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _AdbAndSdkTab extends StatelessWidget {
+  const _AdbAndSdkTab({required this.controller});
+
+  final LauncherController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      children: [
+        _RunningCard(controller: controller),
+        const SizedBox(height: 16),
+        _SdkCard(controller: controller),
+        if (controller.statusMessage != null) ...[
+          const SizedBox(height: 16),
+          _MessageBanner(
+            text: controller.statusMessage!,
+            tone: _BannerTone.info,
+          ),
+        ],
+        if (controller.errorMessage != null) ...[
+          const SizedBox(height: 16),
+          _MessageBanner(
+            text: controller.errorMessage!,
+            tone: _BannerTone.error,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _LogSidePanel extends StatelessWidget {
+  const _LogSidePanel({required this.controller});
+
+  final LauncherController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final logPath = controller.activeEmulatorLogPath;
+    final emuText = controller.emulatorLogContent.trim();
+    final activityText = controller.activityLogs.join('\n');
+
+    return DefaultTabController(
+      length: 2,
+      child: ColoredBox(
+        color: scheme.surfaceContainerLowest,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Material(
+              color: scheme.surfaceContainerLow,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Row(
+                  children: [
+                    const Icon(Icons.terminal, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Panel Log',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Muat ulang log',
+                      iconSize: 18,
+                      onPressed: () => controller.refreshEmulatorLogContent(),
+                      icon: const Icon(Icons.sync),
+                    ),
+                    IconButton(
+                      tooltip: 'Salin isi log',
+                      iconSize: 18,
+                      onPressed: () {
+                        final toCopy =
+                            emuText.isNotEmpty ? emuText : activityText;
+                        if (toCopy.isEmpty) return;
+                        Clipboard.setData(ClipboardData(text: toCopy));
+                        ScaffoldMessenger.of(context)
+                          ..hideCurrentSnackBar()
+                          ..showSnackBar(
+                            const SnackBar(
+                              content: Text('Log disalin ke clipboard.'),
+                            ),
+                          );
+                      },
+                      icon: const Icon(Icons.copy_all_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Bersihkan log',
+                      iconSize: 18,
+                      onPressed: () {
+                        controller.clearEmulatorLog();
+                        controller.clearActivityLogs();
+                      },
+                      icon: const Icon(Icons.delete_sweep_outlined),
+                    ),
+                    if (logPath != null)
+                      IconButton(
+                        tooltip: 'Buka berkas log di Notepad',
+                        iconSize: 18,
+                        onPressed: controller.openLastEmulatorLog,
+                        icon: const Icon(Icons.open_in_new),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Material(
+              color: scheme.surfaceContainerLow,
+              child: const TabBar(
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                tabs: [
+                  Tab(text: 'Log Emulator'),
+                  Tab(text: 'Log Aktivitas'),
+                ],
+              ),
+            ),
+            if (logPath != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                color: scheme.surfaceContainer,
+                child: SelectableText(
+                  logPath,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontFamily: 'Consolas',
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+              ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _MonospaceLogView(
+                    text: emuText.isEmpty
+                        ? 'Belum ada keluaran log emulator.\nPilih AVD lalu tekan Mulai untuk melihat log proses secara langsung di sini.'
+                        : emuText,
+                    isEmptyPlaceholder: emuText.isEmpty,
+                  ),
+                  _MonospaceLogView(
+                    text: activityText.isEmpty
+                        ? 'Belum ada catatan aktivitas.'
+                        : activityText,
+                    isEmptyPlaceholder: activityText.isEmpty,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MonospaceLogView extends StatelessWidget {
+  const _MonospaceLogView({
+    required this.text,
+    required this.isEmptyPlaceholder,
+  });
+
+  final String text;
+  final bool isEmptyPlaceholder;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
+      child: SelectableText(
+        text,
+        style: TextStyle(
+          fontFamily: 'Consolas',
+          fontSize: 12.5,
+          height: 1.4,
+          color: isEmptyPlaceholder
+              ? scheme.onSurfaceVariant
+              : scheme.onSurface,
+        ),
+      ),
     );
   }
 }
@@ -290,11 +543,24 @@ class _AvdCard extends StatelessWidget {
             if (controller.orphanedAvds.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-                child: Text(
-                  'Folder .avd tanpa berkas .ini terdeteksi: ${controller.orphanedAvds.join(', ')}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.tertiary,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Folder .avd tanpa berkas .ini terdeteksi: ${controller.orphanedAvds.join(', ')}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: scheme.tertiary,
+                            ),
                       ),
+                    ),
+                    TextButton.icon(
+                      onPressed: controller.deleting || controller.loading
+                          ? null
+                          : controller.deleteAllOrphanedAvds,
+                      icon: const Icon(Icons.cleaning_services_outlined, size: 16),
+                      label: const Text('Bersihkan'),
+                    ),
+                  ],
                 ),
               ),
             Padding(
@@ -616,12 +882,10 @@ class _MessageBanner extends StatelessWidget {
   const _MessageBanner({
     required this.text,
     required this.tone,
-    this.onOpenLog,
   });
 
   final String text;
   final _BannerTone tone;
-  final VoidCallback? onOpenLog;
 
   @override
   Widget build(BuildContext context) {
@@ -633,22 +897,7 @@ class _MessageBanner extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: SelectableText(text, style: TextStyle(color: fg)),
-            ),
-            if (onOpenLog != null) ...[
-              const SizedBox(width: 8),
-              TextButton.icon(
-                onPressed: onOpenLog,
-                icon: const Icon(Icons.article_outlined, size: 18),
-                label: const Text('Buka Log'),
-              ),
-            ],
-          ],
-        ),
+        child: SelectableText(text, style: TextStyle(color: fg)),
       ),
     );
   }
