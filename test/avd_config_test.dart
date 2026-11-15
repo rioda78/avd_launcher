@@ -148,14 +148,15 @@ void main() {
     );
   });
 
-  test('isAvdLockHeld membersihkan direktori .lock yatim dengan pid yang sudah mati', () {
+  test('isAvdLockHeld membersihkan direktori .lock yatim dengan pid yang sudah mati atau pid yang dipakai ulang proses non-emulator', () {
     final root = Directory.systemTemp.createTempSync('avd_launcher_lock_');
     addTearDown(() {
       if (root.existsSync()) root.deleteSync(recursive: true);
     });
     final lockDir = Directory(p.join(root.path, 'hardware-qemu.ini.lock'))
       ..createSync();
-    File(p.join(lockDir.path, 'pid')).writeAsStringSync('9999999');
+    // Use current Dart test runner PID (alive, but not qemu/emulator)
+    File(p.join(lockDir.path, 'pid')).writeAsStringSync('$pid');
     final multiFile = File(p.join(root.path, 'multiinstance.lock'))
       ..writeAsStringSync('');
 

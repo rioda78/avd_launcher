@@ -350,31 +350,37 @@ bool isFileLockHeld(String path) {
         final pidText = pidFile.readAsStringSync().trim();
         final pid = int.tryParse(pidText);
         if (pid != null && pid > 0) {
-          final alive = _isPidRunningSync(pid);
+          final alive = _isEmulatorPidRunningSync(pid);
           if (alive) return true;
         }
       } catch (_) {}
     }
-    try {
-      dir.deleteSync(recursive: true);
+    if (_forceDeleteLockDirSync(dir)) {
       return false;
-    } on FileSystemException {
-      return true;
     }
+    return dir.existsSync();
   }
 
   final file = File(path);
   if (Platform.isWindows) {
+    // Check if the lock file itself contains a numeric PID.
     try {
-      // On Windows, Android Emulator opens its .lock files without FILE_SHARE_DELETE.
-      // Attempting to delete an unlocked stale .lock file succeeds and cleans it up;
-      // if locked by a running emulator, deleteSync throws a FileSystemException
-      // (sharing violation) without creating or touching the file.
-      file.deleteSync();
-      return false;
-    } on FileSystemException {
-      return true;
+      if (file.lengthSync() > 0 && file.lengthSync() <= 32) {
+        final text = file.readAsStringSync().trim();
+        final pid = int.tryParse(text);
+        if (pid != null && pid > 0 && _isEmulatorPidRunningSync(pid)) {
+          return true;
+        }
+      }
+    } catch (_) {
+      // If reading fails due to an exclusive lock held by a running emulator,
+      // attempting to delete below will also fail and return true.
     }
+
+    if (_forceDeleteLockFileSync(file)) {
+      return false;
+    }
+    return file.existsSync();
   }
   RandomAccessFile? handle;
   try {
@@ -391,7 +397,46 @@ bool isFileLockHeld(String path) {
   }
 }
 
-bool _isPidRunningSync(int pid) {
+bool _forceDeleteLockFileSync(File file) {
+  try {
+    file.deleteSync();
+    return true;
+  } on FileSystemException {
+    if (!Platform.isWindows) return false;
+    try {
+      Process.runSync('attrib', ['-R', '-S', '-H', file.path]);
+      file.deleteSync();
+      return true;
+    } catch (_) {
+      return !file.existsSync();
+    }
+  }
+}
+
+bool _forceDeleteLockDirSync(Directory dir) {
+  try {
+    dir.deleteSync(recursive: true);
+    return true;
+  } on FileSystemException {
+    if (!Platform.isWindows) return false;
+    try {
+      Process.runSync(
+        'attrib',
+        ['-R', '-S', '-H', p.join(dir.path, '*'), '/S', '/D'],
+      );
+      Process.runSync('attrib', ['-R', '-S', '-H', dir.path]);
+      Process.runSync('cmd.exe', ['/c', 'rmdir', '/S', '/Q', dir.path]);
+      if (dir.existsSync()) {
+        dir.deleteSync(recursive: true);
+      }
+      return !dir.existsSync();
+    } catch (_) {
+      return !dir.existsSync();
+    }
+  }
+}
+
+bool _isEmulatorPidRunningSync(int pid) {
   if (pid <= 0) return false;
   try {
     if (Platform.isWindows) {
@@ -402,28 +447,47 @@ bool _isPidRunningSync(int pid) {
         'CSV',
         '/NH',
       ]);
-      final out = result.stdout is String
-          ? result.stdout as String
-          : result.stdout.toString();
-      return out.contains('"$pid"');
+      final out = (result.stdout is String
+              ? result.stdout as String
+              : result.stdout.toString())
+          .toLowerCase();
+      if (!out.contains('"$pid"')) return false;
+      // Guard against Windows PID reuse by non-emulator processes.
+      return out.contains('qemu') || out.contains('emulator');
     }
-    final result = Process.runSync('ps', ['-p', '$pid', '-o', 'pid=']);
-    return result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty;
+    final result = Process.runSync('ps', ['-p', '$pid', '-o', 'comm=']);
+    if (result.exitCode != 0) return false;
+    final out = result.stdout.toString().trim().toLowerCase();
+    return out.contains('qemu') || out.contains('emulator');
   } catch (_) {
     return false;
   }
 }
 
 bool isAvdLockHeld(String avdDirectory) {
-  const names = [
-    'hardware-qemu.ini.lock',
-    'multiinstance.lock',
-    'userdata-qemu.img.lock',
-  ];
+  final dir = Directory(avdDirectory);
+  if (!dir.existsSync()) return false;
   var locked = false;
-  for (final name in names) {
-    if (isFileLockHeld(p.join(avdDirectory, name))) {
-      locked = true;
+  try {
+    for (final entity in dir.listSync()) {
+      final name = p.basename(entity.path).toLowerCase();
+      if (name.endsWith('.lock')) {
+        if (isFileLockHeld(entity.path)) {
+          locked = true;
+        }
+      }
+    }
+  } on FileSystemException {
+    // Fallback to standard lock file names if listing fails.
+    const names = [
+      'hardware-qemu.ini.lock',
+      'multiinstance.lock',
+      'userdata-qemu.img.lock',
+    ];
+    for (final name in names) {
+      if (isFileLockHeld(p.join(avdDirectory, name))) {
+        locked = true;
+      }
     }
   }
   return locked;

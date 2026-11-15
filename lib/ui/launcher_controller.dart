@@ -441,6 +441,13 @@ class LauncherController extends ChangeNotifier {
     lastEmulatorLogPath = null;
     lastEmulatorPid = null;
     final targetAvd = selectedAvd!;
+    if (isAvdRunningByName(targetAvd, checkDiskLock: false)) {
+      errorMessage =
+          'AVD "$targetAvd" sudah berjalan di ADB. Hentikan terlebih dahulu sebelum menyalakan ulang.';
+      starting = false;
+      notifyListeners();
+      return;
+    }
     final previousEmulatorSerials = devices
         .where((device) => device.isEmulator)
         .map((device) => device.serial)

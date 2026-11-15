@@ -327,12 +327,6 @@ class AvdService {
         avdName: name,
         avdHome: resolvedAvdHome,
       );
-      if (isAvdRunning(avdName: name, avdHome: resolvedAvdHome)) {
-        throw AvdException(
-          'AVD "$name" sedang berjalan atau terkunci oleh proses emulator lain. '
-          'Hentikan terlebih dahulu sebelum menyalakan ulang.',
-        );
-      }
       cleanupStaleAvdFiles(
         avdName: name,
         avdHome: resolvedAvdHome,
@@ -473,6 +467,8 @@ class AvdService {
       avdHome: avdHome,
       readFileIfExists: _readIfExists,
     );
+    // isAvdLockHeld inspects all *.lock files/directories in the AVD folder
+    // and automatically deletes any stale lock whose emulator PID is no longer running.
     if (isAvdLockHeld(directory)) {
       return;
     }
