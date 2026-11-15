@@ -156,7 +156,8 @@ class AvdService {
     }
     final resolved = <AdbDevice>[];
     for (final device in devices) {
-      if (device.isEmulator && device.state == 'device') {
+      if (device.isEmulator &&
+          (device.state == 'device' || device.state == 'offline')) {
         final name = await resolveEmulatorAvdName(
           adbPath: adbPath,
           serial: device.serial,
@@ -307,6 +308,7 @@ class AvdService {
 
   Future<EmulatorLaunch> startAvd({
     required String emulatorPath,
+    required String adbPath,
     required String sdkRoot,
     required String avdName,
     String? avdHome,
@@ -325,6 +327,26 @@ class AvdService {
         avdName: name,
         avdHome: resolvedAvdHome,
       );
+      if (isAvdRunning(avdName: name, avdHome: resolvedAvdHome)) {
+        throw AvdException(
+          'AVD "$name" sedang berjalan atau terkunci oleh proses emulator lain. '
+          'Hentikan terlebih dahulu sebelum menyalakan ulang.',
+        );
+      }
+      cleanupStaleAvdFiles(
+        avdName: name,
+        avdHome: resolvedAvdHome,
+      );
+    }
+
+    if (adbPath.trim().isNotEmpty) {
+      try {
+        await runner.run(
+          adbPath,
+          const ['start-server'],
+          timeout: const Duration(seconds: 15),
+        );
+      } catch (_) {}
     }
 
     final logDir = (logDirectory ?? p.dirname(emulatorPath)).trim();
@@ -440,6 +462,38 @@ class AvdService {
       readFileIfExists: _readIfExists,
     );
     return isAvdLockHeld(directory);
+  }
+
+  /// Cleans up stale `.lock`, `bootcompleted.ini`, and `snapshot.trace` files
+  /// in the AVD directory if no running emulator holds the lock.
+  void cleanupStaleAvdFiles({
+    required String avdName,
+    required String avdHome,
+  }) {
+    final directory = resolveAvdDirectory(
+      avdName: avdName,
+      avdHome: avdHome,
+      readFileIfExists: _readIfExists,
+    );
+    if (isAvdLockHeld(directory)) {
+      return;
+    }
+    const staleFiles = [
+      'hardware-qemu.ini.lock',
+      'multiinstance.lock',
+      'bootcompleted.ini',
+      'snapshot.trace',
+    ];
+    for (final name in staleFiles) {
+      final file = File(p.join(directory, name));
+      if (file.existsSync()) {
+        try {
+          file.deleteSync();
+        } on FileSystemException {
+          // ignore if locked or inaccessible
+        }
+      }
+    }
   }
 
   AvdConfigSnapshot loadAvdConfig({

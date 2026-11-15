@@ -41,11 +41,13 @@ Jika sebuah berkas sudah ada di salah satu lokasi itu, atau di lokasi lama `%APP
 ## Fitur
 
 - Daftar AVD dengan tombol Segarkan, menampilkan ringkasan spesifikasi (API, tag, ABI, RAM, penyimpanan), indikator status "Berjalan", dan peringatan jika system image hilang
+- **Unduh & Pasang Android SDK Otomatis**: Jika Android SDK atau komponennya belum ditemukan, tersedia tombol **Unduh & Pasang SDK Otomatis…** (atau **Unduh komponen SDK…**) yang secara otomatis mengunduh Android Command-line Tools dari Google, mengekstrak, menyetujui lisensi SDK, dan menginstal `platform-tools` (`adb.exe`), `emulator`, `platforms`, serta `system-images`
 - Deteksi folder `.avd` yatim (tanpa berkas `.ini` pasangan) di `ANDROID_AVD_HOME`
+- Pembersihan otomatis berkas kunci/status yang tertinggal (`hardware-qemu.ini.lock`, `multiinstance.lock`, `bootcompleted.ini`, `snapshot.trace`) serta menyalakan daemon ADB (`adb start-server`) sebelum emulator diluncurkan agar emulator tidak tertahan saat startup
 - Mulai AVD yang dipilih, tanpa jendela konsol qemu, serta melacak nomor seri emulator baru saat lebih dari satu emulator dijalankan
 - Opsi boot dingin (`-no-snapshot-load`), hapus data (`-wipe-data`, dengan konfirmasi), tanpa audio (`-no-audio`), dan mode GPU (`-gpu auto|host|swiftshader_indirect`, atau memakai nilai di config AVD). Preferensi pilihan AVD terakhir dan opsi jalankan disimpan otomatis di `settings.json`
 - Edit AVD: system image, RAM, penyimpanan internal, mode GPU, dan inti CPU. `config.ini` dicadangkan dengan cap waktu sebelum disimpan. AVD yang sedang berjalan tidak dapat diedit.
-- Buat AVD baru dan Hapus AVD lewat `avdmanager` (jika Command-line Tools belum ada, aplikasi menampilkan cara memasangnya dan tidak menginstal otomatis)
+- Buat AVD baru dan Hapus AVD lewat `avdmanager`
 - Pintasan untuk membuka folder `.avd` di Explorer dan membuka log emulator terakhir di Notepad
 - Daftar perangkat `adb devices -l` beserta nama AVD aslinya, tombol **Pasang APK** (`adb install -r`), tombol **Restart ADB**, dan **Hentikan** untuk emulator (`adb -s emulator-XXXX emu kill`)
 - Pesan kesalahan yang jelas jika SDK atau emulator tidak ditemukan

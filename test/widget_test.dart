@@ -19,6 +19,7 @@ void main() {
     expect(find.text('Edit AVD'), findsOneWidget);
     expect(find.text('Hapus AVD'), findsOneWidget);
     expect(find.text('Buat AVD baru'), findsOneWidget);
+    expect(find.text('Unduh & Pasang SDK Otomatis…'), findsOneWidget);
     expect(find.text('Mode GPU saat dijalankan'), findsOneWidget);
   });
 }

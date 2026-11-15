@@ -8,6 +8,7 @@ import '../models/adb_device.dart';
 import '../services/avd_config.dart';
 import '../services/avd_service.dart';
 import '../services/emulator_diagnostics.dart';
+import '../services/sdk_installer.dart';
 import '../services/sdk_locator.dart';
 import '../services/settings_store.dart';
 
@@ -16,17 +17,20 @@ class LauncherController extends ChangeNotifier {
     required this.settingsStore,
     required this.service,
     SdkLocator? locator,
+    SdkInstaller? sdkInstaller,
     Map<String, String>? environment,
-  }) : locator = locator ??
+  })  : locator = locator ??
             SdkLocator(
               pathExists: (path) => File(path).existsSync(),
               environment: environment ?? Platform.environment,
               localAppData: (environment ?? Platform.environment)['LOCALAPPDATA'],
-            );
+            ),
+        sdkInstaller = sdkInstaller ?? SdkInstaller();
 
   final SettingsStore settingsStore;
   final AvdService service;
   final SdkLocator locator;
+  final SdkInstaller sdkInstaller;
 
   AppSettings settings = const AppSettings();
   SdkLocation sdk = const SdkLocation(root: '', source: '');
@@ -46,6 +50,7 @@ class LauncherController extends ChangeNotifier {
   bool creating = false;
   bool deleting = false;
   bool installingApk = false;
+  bool installingSdk = false;
   String? statusMessage;
   String? errorMessage;
   bool initialized = false;
@@ -288,6 +293,44 @@ class LauncherController extends ChangeNotifier {
     await setManualSdkPath(null);
   }
 
+  String get defaultSdkInstallRoot {
+    if (sdk.root.isNotEmpty) return sdk.root;
+    final manual = sdkOverrideText;
+    if (manual != null && manual.isNotEmpty) return manual;
+    return SdkInstaller.defaultTargetRoot(Platform.environment);
+  }
+
+  Future<void> downloadAndInstallSdk({
+    required SdkSetupConfig config,
+    required void Function(String message) onProgress,
+  }) async {
+    installingSdk = true;
+    errorMessage = null;
+    statusMessage = 'Mengunduh dan memasang Android SDK…';
+    notifyListeners();
+    try {
+      await sdkInstaller.installSdk(
+        config: config,
+        onProgress: (msg) {
+          statusMessage = msg;
+          onProgress(msg);
+          notifyListeners();
+        },
+      );
+      await setManualSdkPath(config.targetRoot.trim());
+      statusMessage =
+          'Android SDK beserta komponennya berhasil dipasang di ${config.targetRoot.trim()}.';
+      notifyListeners();
+    } catch (error) {
+      errorMessage = error.toString();
+      statusMessage = null;
+      rethrow;
+    } finally {
+      installingSdk = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> startSelected() async {
     if (!canStart) {
       if (!sdk.isUsable) {
@@ -315,6 +358,7 @@ class LauncherController extends ChangeNotifier {
     try {
       final launch = await service.startAvd(
         emulatorPath: sdk.emulatorPath!,
+        adbPath: sdk.adbPath ?? '',
         sdkRoot: sdk.root,
         avdName: targetAvd,
         avdHome: _avdHome,
@@ -431,8 +475,12 @@ class LauncherController extends ChangeNotifier {
   String? get avdHome => _avdHome;
 
   String? get _avdHome {
-    final value = Platform.environment['ANDROID_AVD_HOME']?.trim();
-    if (value != null && value.isNotEmpty) return value;
+    for (final entry in Platform.environment.entries) {
+      if (entry.key.toUpperCase() == 'ANDROID_AVD_HOME') {
+        final val = entry.value.trim();
+        if (val.isNotEmpty) return val;
+      }
+    }
     final profile = Platform.environment['USERPROFILE']?.trim();
     if (profile != null && profile.isNotEmpty) {
       return p.join(profile, '.android', 'avd');
@@ -448,7 +496,7 @@ class LauncherController extends ChangeNotifier {
     return null;
   }
 
-  bool isAvdRunningByName(String name) {
+  bool isAvdRunningByName(String name, {bool checkDiskLock = false}) {
     final lower = name.toLowerCase();
     for (final device in devices) {
       if (device.isEmulator &&
@@ -457,15 +505,16 @@ class LauncherController extends ChangeNotifier {
         return true;
       }
     }
+    if (!checkDiskLock) return false;
     final home = _avdHome;
     if (home == null || home.isEmpty) return false;
     return service.isAvdRunning(avdName: name, avdHome: home);
   }
 
-  bool isSelectedAvdRunning() {
+  bool isSelectedAvdRunning({bool checkDiskLock = true}) {
     final name = selectedAvd;
     if (name == null || name.isEmpty) return false;
-    return isAvdRunningByName(name);
+    return isAvdRunningByName(name, checkDiskLock: checkDiskLock);
   }
 
   AvdConfigSnapshot loadSelectedConfig() {
@@ -575,7 +624,7 @@ class LauncherController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    if (isAvdRunningByName(name)) {
+    if (isAvdRunningByName(name, checkDiskLock: true)) {
       errorMessage = 'AVD "$name" sedang berjalan. Hentikan emulator dulu sebelum menghapus.';
       notifyListeners();
       return;
@@ -689,7 +738,8 @@ class LauncherController extends ChangeNotifier {
           editing ||
           creating ||
           deleting ||
-          installingApk) {
+          installingApk ||
+          installingSdk) {
         return;
       }
       unawaited(

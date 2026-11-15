@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/adb_device.dart';
 import 'create_avd_dialog.dart';
 import 'edit_avd_dialog.dart';
+import 'install_sdk_dialog.dart';
 import 'launcher_controller.dart';
 
 class HomePage extends StatelessWidget {
@@ -127,12 +128,14 @@ class _SdkCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 FilledButton.tonalIcon(
-                  onPressed: controller.loading ? null : () => _browse(context),
+                  onPressed: controller.loading || controller.installingSdk
+                      ? null
+                      : () => _browse(context),
                   icon: const Icon(Icons.folder_open),
                   label: const Text('Pilih folder…'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: controller.loading
+                  onPressed: controller.loading || controller.installingSdk
                       ? null
                       : () async {
                           await controller.useAutomaticSdk();
@@ -143,6 +146,22 @@ class _SdkCard extends StatelessWidget {
                   icon: const Icon(Icons.travel_explore),
                   label: const Text('Deteksi otomatis'),
                 ),
+                if (!sdk.isUsable)
+                  FilledButton.icon(
+                    onPressed: controller.loading || controller.installingSdk
+                        ? null
+                        : () => showInstallSdkDialog(context, controller),
+                    icon: const Icon(Icons.download),
+                    label: const Text('Unduh & Pasang SDK Otomatis…'),
+                  )
+                else
+                  OutlinedButton.icon(
+                    onPressed: controller.loading || controller.installingSdk
+                        ? null
+                        : () => showInstallSdkDialog(context, controller),
+                    icon: const Icon(Icons.download),
+                    label: const Text('Unduh komponen SDK…'),
+                  ),
               ],
             ),
           ],
@@ -323,7 +342,7 @@ class _AvdCard extends StatelessWidget {
   Future<void> _confirmDeleteAvd(BuildContext context) async {
     final name = controller.selectedAvd;
     if (name == null || name.isEmpty) return;
-    if (controller.isAvdRunningByName(name)) {
+    if (controller.isAvdRunningByName(name, checkDiskLock: true)) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(

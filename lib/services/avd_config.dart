@@ -341,6 +341,18 @@ String backupConfigPath(String configPath, DateTime timestamp) {
 bool isFileLockHeld(String path) {
   final file = File(path);
   if (!file.existsSync()) return false;
+  if (Platform.isWindows) {
+    try {
+      // On Windows, Android Emulator opens its .lock files without FILE_SHARE_DELETE.
+      // Attempting to delete an unlocked stale .lock file succeeds and cleans it up;
+      // if locked by a running emulator, deleteSync throws a FileSystemException
+      // (sharing violation) without creating or touching the file.
+      file.deleteSync();
+      return false;
+    } on FileSystemException {
+      return true;
+    }
+  }
   RandomAccessFile? handle;
   try {
     handle = file.openSync(mode: FileMode.writeOnlyAppend);
@@ -357,11 +369,16 @@ bool isFileLockHeld(String path) {
 }
 
 bool isAvdLockHeld(String avdDirectory) {
+  // Check hardware-qemu.ini.lock first; only check multiinstance.lock if needed,
+  // and never create files that do not exist.
   const names = ['hardware-qemu.ini.lock', 'multiinstance.lock'];
+  var locked = false;
   for (final name in names) {
-    if (isFileLockHeld(p.join(avdDirectory, name))) return true;
+    if (isFileLockHeld(p.join(avdDirectory, name))) {
+      locked = true;
+    }
   }
-  return false;
+  return locked;
 }
 
 String findAvdManagerPath(String sdkRoot) {

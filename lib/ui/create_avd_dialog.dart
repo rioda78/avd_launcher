@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../services/avd_config.dart';
+import 'install_sdk_dialog.dart';
 import 'launcher_controller.dart';
 
 Future<void> showCreateAvdDialog(BuildContext context, LauncherController controller) async {
   final manager = controller.avdManagerPath;
   if (manager == null || manager.isEmpty) {
     final message = avdManagerMissingMessage(controller.sdk.root);
-    await showDialog<void>(
+    final openInstaller = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
@@ -15,13 +16,21 @@ Future<void> showCreateAvdDialog(BuildContext context, LauncherController contro
           content: SelectableText(message),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(context).pop(false),
               child: const Text('Tutup'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(context).pop(true),
+              icon: const Icon(Icons.download),
+              label: const Text('Unduh Otomatis…'),
             ),
           ],
         );
       },
     );
+    if (openInstaller == true && context.mounted) {
+      await showInstallSdkDialog(context, controller);
+    }
     return;
   }
 
@@ -30,24 +39,32 @@ Future<void> showCreateAvdDialog(BuildContext context, LauncherController contro
     final devices = await controller.listDeviceProfiles();
     if (!context.mounted) return;
     if (images.isEmpty) {
-      await showDialog<void>(
+      final openInstaller = await showDialog<bool>(
         context: context,
         builder: (context) {
           return AlertDialog(
             title: const Text('Tidak ada system image'),
             content: const Text(
               'Tidak ada system image terpasang di folder system-images pada SDK. '
-              'Pasang image lewat Android Studio atau sdkmanager, lalu coba lagi.',
+              'Anda dapat mengunduhnya secara otomatis sekarang, atau lewat Android Studio / sdkmanager.',
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () => Navigator.of(context).pop(false),
                 child: const Text('Tutup'),
+              ),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop(true),
+                icon: const Icon(Icons.download),
+                label: const Text('Unduh System Image…'),
               ),
             ],
           );
         },
       );
+      if (openInstaller == true && context.mounted) {
+        await showInstallSdkDialog(context, controller);
+      }
       return;
     }
     final created = await showDialog<bool>(
