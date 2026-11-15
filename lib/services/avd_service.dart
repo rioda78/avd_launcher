@@ -282,7 +282,7 @@ class AvdService {
     );
     final start = await runner.run(
       adbPath,
-      const ['start-server'],
+      const ['devices'],
       timeout: const Duration(seconds: 20),
     );
     if (start.exitCode != 0) {
@@ -343,7 +343,7 @@ class AvdService {
       try {
         await runner.run(
           adbPath,
-          const ['start-server'],
+          const ['devices'],
           timeout: const Duration(seconds: 15),
         );
       } catch (_) {}
@@ -383,8 +383,6 @@ class AvdService {
         'Gagal menjalankan emulator untuk "$name".\n${error.message}',
       );
     }
-
-    await logFile.writeAsString('PID: $pid\n', mode: FileMode.append);
 
     await Future<void>.delayed(earlyExitWindow);
     final stillRunning = await runner.isProcessRunning(pid);
@@ -717,62 +715,75 @@ class AvdService {
       cleanupStaleAvdFiles(avdName: trimmedName, avdHome: trimmedHome);
     }
 
-    final manager = (avdManagerPath ?? findAvdManagerPath(sdkRoot)).trim();
-    String? managerError;
-    if (manager.isNotEmpty) {
-      final result = await runner.run(
-        manager,
-        ['delete', 'avd', '-n', trimmedName],
-        timeout: const Duration(seconds: 30),
-        environment: {
-          'ANDROID_SDK_ROOT': sdkRoot,
-          'ANDROID_HOME': sdkRoot,
-          if (trimmedHome.isNotEmpty) 'ANDROID_AVD_HOME': trimmedHome,
-        },
-        runInShell: Platform.isWindows && manager.toLowerCase().endsWith('.bat'),
-      );
-      if (result.exitCode != 0) {
-        managerError =
-            'Gagal menghapus AVD "$trimmedName" lewat avdmanager (kode ${result.exitCode}).'
-            '${_detail(result)}';
-      }
-    }
+    final candidateHomes = <String>{
+      if (trimmedHome.isNotEmpty) trimmedHome,
+      if ((Platform.environment['USERPROFILE'] ?? '').trim().isNotEmpty)
+        p.join(Platform.environment['USERPROFILE']!.trim(), '.android', 'avd'),
+    };
 
-    // Also remove the .ini file and .avd directory directly so broken/incomplete
-    // AVDs that avdmanager does not recognize are still cleanly removed.
-    if (trimmedHome.isNotEmpty) {
-      final targetAvdDir = resolveAvdDirectory(
-        avdName: trimmedName,
-        avdHome: trimmedHome,
-        readFileIfExists: _readIfExists,
-      );
-      final iniFile = File(p.join(trimmedHome, '$trimmedName.ini'));
-      final avdDir = Directory(targetAvdDir);
-      var removedDirectly = false;
-      try {
+    // Resolve target .avd directory BEFORE deleting .ini files or running avdmanager,
+    // so custom `path=` entries in <name>.ini are also cleaned up.
+    final dirsToDelete = <String>{
+      for (final h in candidateHomes) ...[
+        resolveAvdDirectory(
+          avdName: trimmedName,
+          avdHome: h,
+          readFileIfExists: _readIfExists,
+        ),
+        p.join(h, '$trimmedName.avd'),
+      ],
+    };
+    final inisToDelete = <String>{
+      for (final h in candidateHomes) p.join(h, '$trimmedName.ini'),
+    };
+
+    var removedDirectly = false;
+    try {
+      for (final iniPath in inisToDelete) {
+        final iniFile = File(iniPath);
         if (await iniFile.exists()) {
           await _forceDeleteFile(iniFile);
           removedDirectly = true;
         }
+      }
+      for (final dirPath in dirsToDelete) {
+        final avdDir = Directory(dirPath);
         if (await avdDir.exists()) {
           await _forceDeleteDirectory(avdDir);
           removedDirectly = true;
         }
-      } on FileSystemException catch (error) {
-        throw AvdException(
-          'Gagal menghapus berkas AVD "$trimmedName":\n${error.message}',
-        );
       }
-      if (removedDirectly) {
-        return;
-      }
+    } on FileSystemException catch (error) {
+      throw AvdException(
+        'Gagal menghapus berkas AVD "$trimmedName":\n${error.message}',
+      );
     }
 
+    if (removedDirectly) {
+      return;
+    }
+
+    final manager = (avdManagerPath ?? findAvdManagerPath(sdkRoot)).trim();
     if (manager.isEmpty) {
       throw AvdException(avdManagerMissingMessage(sdkRoot));
     }
-    if (managerError != null) {
-      throw AvdException(managerError);
+
+    final result = await runner.run(
+      manager,
+      ['delete', 'avd', '-n', trimmedName],
+      timeout: const Duration(seconds: 30),
+      environment: {
+        'ANDROID_SDK_ROOT': sdkRoot,
+        'ANDROID_HOME': sdkRoot,
+        if (trimmedHome.isNotEmpty) 'ANDROID_AVD_HOME': trimmedHome,
+      },
+      runInShell: Platform.isWindows && manager.toLowerCase().endsWith('.bat'),
+    );
+    if (result.exitCode != 0) {
+      throw AvdException(
+        'Gagal menghapus AVD "$trimmedName" lewat avdmanager (kode ${result.exitCode}).'
+        '${_detail(result)}',
+      );
     }
   }
 

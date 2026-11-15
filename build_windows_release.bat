@@ -54,7 +54,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-"%CMAKE%" -S "%ROOT%windows" -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM="%NINJA_DIR%\ninja.exe" -DFLUTTER_TARGET_PLATFORM=windows-x64
+"%CMAKE%" --fresh -S "%ROOT%windows" -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM="%NINJA_DIR%\ninja.exe" -DFLUTTER_TARGET_PLATFORM=windows-x64
 if errorlevel 1 exit /b 1
 "%CMAKE%" --build "%BUILD_DIR%"
 if errorlevel 1 exit /b 1

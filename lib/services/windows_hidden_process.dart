@@ -13,6 +13,7 @@ const _genericRead = 0x80000000;
 const _genericWrite = 0x40000000;
 const _fileShareRead = 0x00000001;
 const _fileShareWrite = 0x00000002;
+const _fileShareDelete = 0x00000004;
 const _openAlways = 4;
 const _openExisting = 3;
 const _fileAttributeNormal = 0x00000080;
@@ -186,9 +187,10 @@ Future<int> startWindowsHiddenProcess({
   }
 
   final command = windowsCommandLine(executable, arguments);
-  final envMap = <String, String>{}
-    ..addAll(Platform.environment)
-    ..addAll(environment ?? const {});
+  final envMap = _mergeCaseInsensitiveEnvironment(
+    Platform.environment,
+    environment ?? const {},
+  );
 
   final appPtr = executable.toNativeUtf16();
   final cmdPtr = command.toNativeUtf16();
@@ -234,7 +236,7 @@ Future<int> startWindowsHiddenProcess({
     logHandle = _createFileW(
       logName,
       _fileAppendData | _synchronize | _genericWrite,
-      _fileShareRead | _fileShareWrite,
+      _fileShareRead | _fileShareWrite | _fileShareDelete,
       sa,
       _openAlways,
       _fileAttributeNormal,
@@ -353,9 +355,43 @@ String quoteWindowsArg(String argument) {
   return buffer.toString();
 }
 
+Map<String, String> _mergeCaseInsensitiveEnvironment(
+  Map<String, String> base,
+  Map<String, String> overrides,
+) {
+  final result = <String, String>{};
+  final keyByUpper = <String, String>{};
+  for (final entry in base.entries) {
+    if (entry.key.isEmpty) continue;
+    final upper = entry.key.toUpperCase();
+    final existingKey = keyByUpper[upper];
+    if (existingKey != null) {
+      result.remove(existingKey);
+    }
+    keyByUpper[upper] = entry.key;
+    result[entry.key] = entry.value;
+  }
+  for (final entry in overrides.entries) {
+    if (entry.key.isEmpty) continue;
+    final upper = entry.key.toUpperCase();
+    final existingKey = keyByUpper[upper];
+    if (existingKey != null) {
+      result.remove(existingKey);
+    }
+    keyByUpper[upper] = entry.key;
+    result[entry.key] = entry.value;
+  }
+  return result;
+}
+
 Pointer<Utf16> _environmentBlock(Map<String, String> environment) {
-  final entries = environment.entries
+  final sortedEntries = environment.entries
       .where((entry) => entry.key.isNotEmpty)
+      .toList()
+    ..sort(
+      (a, b) => a.key.toUpperCase().compareTo(b.key.toUpperCase()),
+    );
+  final entries = sortedEntries
       .map((entry) => '${entry.key}=${entry.value}')
       .toList();
   final text = '${entries.join('\u0000')}\u0000\u0000';

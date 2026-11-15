@@ -72,21 +72,51 @@ class RealProcessRunner implements ProcessRunner {
     String? stdin,
   }) async {
     if (stdin == null) {
-      final future = Process.run(
+      final process = await Process.start(
         executable,
         arguments,
         workingDirectory: workingDirectory,
         environment: environment,
         includeParentEnvironment: true,
         runInShell: runInShell,
-        stdoutEncoding: const SystemEncoding(),
-        stderrEncoding: const SystemEncoding(),
       );
-      final result = timeout == null ? await future : await future.timeout(timeout);
+      await process.stdin.close();
+      final stdoutBuffer = StringBuffer();
+      final stderrBuffer = StringBuffer();
+      final stdoutSub = process.stdout
+          .transform(const SystemEncoding().decoder)
+          .listen(stdoutBuffer.write, onError: (_) {});
+      final stderrSub = process.stderr
+          .transform(const SystemEncoding().decoder)
+          .listen(stderrBuffer.write, onError: (_) {});
+      late final int exitCode;
+      try {
+        if (timeout == null) {
+          exitCode = await process.exitCode;
+        } else {
+          exitCode = await process.exitCode.timeout(
+            timeout,
+            onTimeout: () {
+              process.kill();
+              throw TimeoutException(
+                'Perintah melebihi batas waktu (${timeout.inSeconds} dtk): $executable',
+                timeout,
+              );
+            },
+          );
+        }
+        // Give streams a brief moment to flush remaining buffered bytes,
+        // without blocking if a background child (like adb daemon) inherited
+        // the stdout/stderr pipe handles.
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      } finally {
+        await stdoutSub.cancel();
+        await stderrSub.cancel();
+      }
       return ProcessCommandResult(
-        exitCode: result.exitCode,
-        stdout: result.stdout is String ? result.stdout as String : result.stdout.toString(),
-        stderr: result.stderr is String ? result.stderr as String : result.stderr.toString(),
+        exitCode: exitCode,
+        stdout: stdoutBuffer.toString(),
+        stderr: stderrBuffer.toString(),
       );
     }
 
