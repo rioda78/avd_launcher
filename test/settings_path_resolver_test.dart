@@ -67,7 +67,7 @@ void main() {
     final unique = SettingsPathResolver.uniqueCandidates([
       const SettingsCandidate('  ', 'kosong'),
       local,
-      SettingsCandidate(r'C:\Users\x\AppData\Local\AVD Launcher\', 'duplikat'),
+      const SettingsCandidate(r'C:\Users\user\AppData\Local\AVD Launcher\', 'duplikat'),
       portable,
     ]);
     expect(unique.map((c) => c.directory).toList(), [local.directory, portable.directory]);

@@ -751,11 +751,11 @@ class AvdService {
       var removedDirectly = false;
       try {
         if (await iniFile.exists()) {
-          await iniFile.delete();
+          await _forceDeleteFile(iniFile);
           removedDirectly = true;
         }
         if (await avdDir.exists()) {
-          await avdDir.delete(recursive: true);
+          await _forceDeleteDirectory(avdDir);
           removedDirectly = true;
         }
       } on FileSystemException catch (error) {
@@ -785,7 +785,42 @@ class AvdService {
     if (trimmedHome.isEmpty || trimmedName.isEmpty) return;
     final dir = Directory(p.join(trimmedHome, '$trimmedName.avd'));
     if (await dir.exists()) {
+      await _forceDeleteDirectory(dir);
+    }
+  }
+
+  Future<void> _forceDeleteFile(File file) async {
+    try {
+      await file.delete();
+    } on FileSystemException {
+      if (Platform.isWindows) {
+        await Process.run('attrib', ['-R', '-S', '-H', file.path]);
+        await file.delete();
+      } else {
+        rethrow;
+      }
+    }
+  }
+
+  Future<void> _forceDeleteDirectory(Directory dir) async {
+    try {
       await dir.delete(recursive: true);
+    } on FileSystemException {
+      if (Platform.isWindows) {
+        // Android Emulator creates ReadOnly files (e.g. data\misc\pstore\pstore.bin)
+        // which cause Dart's Directory.delete(recursive: true) to fail with errno 5.
+        await Process.run(
+          'attrib',
+          ['-R', '-S', '-H', p.join(dir.path, '*'), '/S', '/D'],
+        );
+        await Process.run('attrib', ['-R', '-S', '-H', dir.path]);
+        await Process.run('cmd.exe', ['/c', 'rmdir', '/S', '/Q', dir.path]);
+        if (await dir.exists()) {
+          await dir.delete(recursive: true);
+        }
+      } else {
+        rethrow;
+      }
     }
   }
 
