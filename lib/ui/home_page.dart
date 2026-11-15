@@ -1,6 +1,8 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import 'create_avd_dialog.dart';
+import 'edit_avd_dialog.dart';
 import 'launcher_controller.dart';
 
 class HomePage extends StatelessWidget {
@@ -180,7 +182,7 @@ class _AvdCard extends StatelessWidget {
               const Padding(
                 padding: EdgeInsets.fromLTRB(8, 4, 8, 12),
                 child: Text(
-                  'Tidak ada AVD yang ditemukan. Buat virtual device di Android Studio atau dengan avdmanager.',
+                  'Tidak ada AVD yang ditemukan. Buat virtual device dari tombol di bawah, di Android Studio, atau dengan avdmanager.',
                 ),
               )
             else
@@ -198,6 +200,29 @@ class _AvdCard extends StatelessWidget {
                   ],
                 ),
               ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: controller.canCreateAvd
+                        ? () => showCreateAvdDialog(context, controller)
+                        : null,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Buat AVD baru'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: controller.canEditSelected
+                        ? () => showEditAvdDialog(context, controller)
+                        : null,
+                    icon: const Icon(Icons.edit),
+                    label: const Text('Edit AVD'),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -245,6 +270,30 @@ class _OptionsCard extends StatelessWidget {
               subtitle: const Text('Menjalankan emulator tanpa suara  (−no-audio)'),
               dense: true,
               controlAffinity: ListTileControlAffinity.leading,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: DropdownButtonFormField<String>(
+                // ignore: deprecated_member_use
+                value: controller.gpuLaunchMode,
+                decoration: const InputDecoration(
+                  labelText: 'Mode GPU saat dijalankan',
+                  border: OutlineInputBorder(),
+                ),
+                isExpanded: true,
+                items: const [
+                  DropdownMenuItem(value: 'default', child: Text('Dari config AVD')),
+                  DropdownMenuItem(value: 'auto', child: Text('auto')),
+                  DropdownMenuItem(value: 'host', child: Text('host (GPU komputer)')),
+                  DropdownMenuItem(
+                    value: 'swiftshader_indirect',
+                    child: Text('swiftshader_indirect (software)'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) controller.setGpuLaunchMode(value);
+                },
+              ),
             ),
             const SizedBox(height: 8),
             Align(
@@ -355,7 +404,6 @@ class _RunningCard extends StatelessWidget {
     );
   }
 }
-
 
 void _showSettingsSnackBar(BuildContext context, LauncherController controller) {
   final path = controller.settingsFilePath;

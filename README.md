@@ -1,15 +1,20 @@
-# AVD Launcher
+﻿# AVD Launcher
 
 Aplikasi desktop Windows untuk memilih Android Virtual Device (AVD) dan menjalankannya.
 
 ## Menjalankan
 
-Hasil build yang sudah diverifikasi:
+Gunakan salah satu lokasi resmi ini (keduanya menunjuk ke exe yang sama):
 
-`build\windows\x64\runner\Release\avd_launcher.exe`
+- pintasan `AVD Launcher.lnk` di folder proyek `E:\proyek\avd_launcher`
+- `E:\proyek\avd_launcher\build\windows\x64\runner\Release\avd_launcher.exe`
+
+Jangan jalankan `build\windows\x64\runner\avd_launcher.exe` (tanpa folder Release). File itu adalah keluaran Ninja yang sering tidak disertai `data\app.so` dan DLL plugin terbaru, sehingga aplikasi memakai kode lama. Skrip build memindahkan file lepas itu ke `build\windows\x64\runner_stray_backup` dan memperbarui pintasan.
+
+Tutup AVD Launcher sebelum membangun ulang, agar `avd_launcher.exe` di folder Release dapat ditimpa.
 
 1. Pastikan Android SDK sudah terpasang. Aplikasi mencari `emulator.exe` dan `adb.exe` dari, berurutan:
-   - folder yang Anda pilih secara manual (disimpan di `%APPDATA%\AVD Launcher\settings.json`)
+   - folder yang Anda pilih secara manual (disimpan di `settings.json`, lihat di bawah)
    - `ANDROID_HOME`
    - `ANDROID_SDK_ROOT`
    - `%LOCALAPPDATA%\Android\Sdk`
@@ -23,7 +28,7 @@ Hasil build yang sudah diverifikasi:
 
 Emulator dijalankan terpisah dari aplikasi. Menutup AVD Launcher tidak menghentikan emulator yang sudah mulai.
 
-Saat Mulai, aplikasi meneruskan `ANDROID_SDK_ROOT`, `ANDROID_HOME`, dan `ANDROID_AVD_HOME`, menulis log emulator ke folder pengaturan, dan memantau `adb devices` sampai perangkat tampil atau prosesnya berhenti. Jika system image AVD tidak ada, pesan kesalahan ditampilkan tanpa menunggu.
+Saat Mulai, aplikasi menjalankan `emulator.exe` (bukan qemu secara langsung) dari folder `SDK\emulator`, meneruskan `ANDROID_SDK_ROOT`, `ANDROID_HOME`, dan `ANDROID_AVD_HOME`, menyembunyikan jendela konsol, dan menulis log ke folder pengaturan. Daftar perangkat dipantau lewat `adb devices` sampai emulator tampil atau prosesnya berhenti. Jika system image AVD tidak ada, pesan kesalahan ditampilkan tanpa menunggu, beserta contoh perintah `sdkmanager` untuk memasangnya (perintah itu tidak dijalankan otomatis).
 
 Pengaturan (misalnya folder SDK manual) disimpan ke `settings.json` pada lokasi pertama yang dapat ditulisi, berurutan:
 
@@ -36,8 +41,10 @@ Jika sebuah berkas sudah ada di salah satu lokasi itu, atau di lokasi lama `%APP
 ## Fitur
 
 - Daftar AVD dengan tombol Segarkan
-- Mulai AVD yang dipilih
-- Opsi boot dingin (`-no-snapshot-load`), hapus data (`-wipe-data`, dengan konfirmasi), dan tanpa audio (`-no-audio`)
+- Mulai AVD yang dipilih, tanpa jendela konsol qemu
+- Opsi boot dingin (`-no-snapshot-load`), hapus data (`-wipe-data`, dengan konfirmasi), tanpa audio (`-no-audio`), dan mode GPU (`-gpu auto|host|swiftshader_indirect`, atau memakai nilai di config AVD)
+- Edit AVD: system image, RAM, penyimpanan internal, mode GPU, dan inti CPU. `config.ini` dicadangkan dengan cap waktu sebelum disimpan. AVD yang sedang berjalan tidak dapat diedit.
+- Buat AVD baru lewat `avdmanager` (jika Command-line Tools belum ada, aplikasi menampilkan cara memasangnya dan tidak menginstal otomatis)
 - Daftar perangkat `adb devices -l`, dan Hentikan untuk emulator (`adb -s emulator-XXXX emu kill`)
 - Pesan kesalahan yang jelas jika SDK atau emulator tidak ditemukan
 
@@ -68,6 +75,5 @@ Jika Visual Studio sudah diperbaiki (beban kerja "Desktop development with C++")
 ## Batasan
 
 - Hanya mendukung Windows, karena path yang dicari adalah `emulator.exe` dan `adb.exe`.
-- Aplikasi tidak membuat, mengubah, atau menghapus AVD. Itu tetap dilakukan di Android Studio atau `avdmanager`.
 - Perangkat fisik yang terlihat di adb ditampilkan, tetapi tidak dapat dihentikan dari aplikasi ini.
 - Folder AVD yang tidak lengkap (ada direktori `.avd` tanpa file `.ini` yang sesuai) tidak muncul di `emulator -list-avds`, jadi juga tidak muncul di daftar aplikasi.

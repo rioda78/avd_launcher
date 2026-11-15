@@ -70,7 +70,25 @@ if exist "%ROOT%build\flutter_assets" (
   xcopy /E /I /Y "%ROOT%build\flutter_assets" "%RELEASE_DIR%\data\flutter_assets" >nul
 )
 
+rem Satu lokasi resmi: runner\Release. Ninja juga menulis avd_launcher.exe
+rem langsung di runner\ (tanpa data terbaru). Pindahkan file lepas itu ke
+rem folder cadangan agar tidak terjalankan versi lama secara tidak sengaja.
+set "STRAY_DIR=%BUILD_DIR%\runner"
+set "STRAY_BACKUP=%BUILD_DIR%\runner_stray_backup"
+if not exist "%STRAY_BACKUP%" mkdir "%STRAY_BACKUP%"
+for %%N in (avd_launcher.exe flutter_windows.dll dartjni.dll file_selector_windows_plugin.dll) do (
+  if exist "%STRAY_DIR%\%%N" move /Y "%STRAY_DIR%\%%N" "%STRAY_BACKUP%\%%N" >nul
+)
+if exist "%STRAY_DIR%\data" (
+  if exist "%STRAY_BACKUP%\data" rmdir /S /Q "%STRAY_BACKUP%\data"
+  move /Y "%STRAY_DIR%\data" "%STRAY_BACKUP%\data" >nul
+)
+
+rem Pintasan di folder proyek ke exe resmi.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%ROOT%AVD Launcher.lnk'); $s.TargetPath='%RELEASE_DIR%\avd_launcher.exe'; $s.WorkingDirectory='%RELEASE_DIR%'; $s.Save()"
+
 echo.
-echo Selesai. Jalankan:
+echo Selesai. Jalankan (satu-satunya lokasi resmi):
 echo   %RELEASE_DIR%\avd_launcher.exe
+echo atau pintasan: %ROOT%AVD Launcher.lnk
 exit /b 0

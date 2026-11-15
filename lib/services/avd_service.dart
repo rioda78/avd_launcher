@@ -1,10 +1,9 @@
-import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
 import '../models/adb_device.dart';
+import 'avd_config.dart';
 import 'emulator_diagnostics.dart';
 import 'output_parser.dart';
 import 'process_runner.dart';
@@ -23,17 +22,26 @@ class LaunchOptions {
     this.coldBoot = false,
     this.wipeData = false,
     this.noAudio = false,
+    this.gpuMode,
   });
 
   final bool coldBoot;
   final bool wipeData;
   final bool noAudio;
 
+  /// When set to auto, host, or swiftshader_indirect, passed as `-gpu`.
+  /// Null or empty means the AVD's config.ini value is used.
+  final String? gpuMode;
+
   List<String> toArgs(String avdName) {
     final args = <String>['-avd', avdName];
     if (coldBoot) args.add('-no-snapshot-load');
     if (wipeData) args.add('-wipe-data');
     if (noAudio) args.add('-no-audio');
+    final gpu = gpuMode?.trim();
+    if (gpu != null && gpu.isNotEmpty && gpu != 'default') {
+      args.addAll(['-gpu', gpu]);
+    }
     return args;
   }
 }
@@ -43,6 +51,30 @@ class EmulatorLaunch {
 
   final int pid;
   final String logPath;
+}
+
+class AvdConfigSnapshot {
+  const AvdConfigSnapshot({
+    required this.avdName,
+    required this.avdDirectory,
+    required this.configPath,
+    required this.document,
+    required this.installedImages,
+    required this.currentImageMissing,
+  });
+
+  final String avdName;
+  final String avdDirectory;
+  final String configPath;
+  final IniDocument document;
+  final List<SystemImage> installedImages;
+  final bool currentImageMissing;
+
+  String get imageSysdir => document.get('image.sysdir.1') ?? '';
+  String get ramSize => document.get('hw.ramSize') ?? '2048';
+  String get storageSize => document.get('disk.dataPartition.size') ?? '6G';
+  String get gpuMode => document.get('hw.gpu.mode') ?? 'auto';
+  String get cpuCores => document.get('hw.cpu.ncore') ?? '4';
 }
 
 class AvdService {
@@ -125,52 +157,42 @@ class AvdService {
     final logPath = p.join(logDir, 'emulator-${sanitizeForFileName(name)}.log');
     final logFile = File(logPath);
     await logFile.parent.create(recursive: true);
-    final sink = logFile.openWrite();
-    var logHeader = 'AVD: $name\n'
-        'Waktu: ${DateTime.now().toIso8601String()}\n'
-        'Perintah: $emulatorPath ${options.toArgs(name).join(' ')}\n'
-        'ANDROID_SDK_ROOT=$sdkRoot\n'
-        'ANDROID_HOME=$sdkRoot\n'
-        'ANDROID_AVD_HOME=${resolvedAvdHome.isEmpty ? '(tidak disetel)' : resolvedAvdHome}\n'
-        '---\n';
-    sink.write(logHeader);
-
     final environment = <String, String>{
       'ANDROID_SDK_ROOT': sdkRoot,
       'ANDROID_HOME': sdkRoot,
       if (resolvedAvdHome.isNotEmpty) 'ANDROID_AVD_HOME': resolvedAvdHome,
     };
+    final args = options.toArgs(name);
+    final header = 'AVD: $name\n'
+        'Waktu: ${DateTime.now().toIso8601String()}\n'
+        'Perintah: $emulatorPath ${args.join(' ')}\n'
+        'Direktori kerja: ${p.dirname(emulatorPath)}\n'
+        'ANDROID_SDK_ROOT=$sdkRoot\n'
+        'ANDROID_HOME=$sdkRoot\n'
+        'ANDROID_AVD_HOME=${resolvedAvdHome.isEmpty ? '(tidak disetel)' : resolvedAvdHome}\n'
+        '---\n';
+    await logFile.writeAsString(header);
 
-    late final SpawnedProcess spawned;
+    late final int pid;
     try {
-      spawned = await runner.startDetachedWithStdio(
+      pid = await runner.startDetachedHidden(
         emulatorPath,
-        options.toArgs(name),
+        args,
         workingDirectory: p.dirname(emulatorPath),
         environment: environment,
+        logPath: logPath,
       );
     } on ProcessException catch (error) {
-      await sink.flush();
-      await sink.close();
       throw AvdException(
         'Gagal menjalankan emulator untuk "$name".\n${error.message}',
       );
     }
 
-    sink.writeln('PID: ${spawned.pid}');
-    final decoder = const Utf8Decoder(allowMalformed: true);
-    void writeLog(List<int> data) {
-      sink.write(decoder.convert(data));
-      unawaited(sink.flush());
-    }
-    spawned.stdout.listen(writeLog, onError: (_) {});
-    spawned.stderr.listen(writeLog, onError: (_) {});
+    await logFile.writeAsString('PID: $pid\n', mode: FileMode.append);
 
     await Future<void>.delayed(earlyExitWindow);
-    final stillRunning = await runner.isProcessRunning(spawned.pid);
-    await sink.flush();
+    final stillRunning = await runner.isProcessRunning(pid);
     if (!stillRunning) {
-      await sink.close();
       final log = await _readLog(logPath);
       final extracted = extractEmulatorFailure(log);
       throw AvdException(
@@ -180,8 +202,7 @@ class AvdService {
       );
     }
 
-    unawaited(sink.flush());
-    return EmulatorLaunch(pid: spawned.pid, logPath: logPath);
+    return EmulatorLaunch(pid: pid, logPath: logPath);
   }
 
   void _assertSystemImagePresent({
@@ -208,7 +229,8 @@ class AvdService {
       throw AvdException(
         'System image untuk "$avdName" tidak ditemukan:\n'
         '$missing\n'
-        'Pasang image tersebut di SDK, atau pilih AVD lain yang imagenya sudah ada.',
+        'Pasang image tersebut di SDK, atau pilih AVD lain yang imagenya sudah ada.\n'
+        'Contoh: ${sdkmanagerInstallCommand(missing)}',
       );
     }
   }
@@ -237,6 +259,240 @@ class AvdService {
 
   Future<bool> isProcessRunning(int pid) => runner.isProcessRunning(pid);
 
+  bool isAvdRunning({required String avdName, required String avdHome}) {
+    final directory = resolveAvdDirectory(
+      avdName: avdName,
+      avdHome: avdHome,
+      readFileIfExists: _readIfExists,
+    );
+    return isAvdLockHeld(directory);
+  }
+
+  AvdConfigSnapshot loadAvdConfig({
+    required String avdName,
+    required String avdHome,
+    required String sdkRoot,
+  }) {
+    final directory = resolveAvdDirectory(
+      avdName: avdName,
+      avdHome: avdHome,
+      readFileIfExists: _readIfExists,
+    );
+    final configPath = p.join(directory, 'config.ini');
+    final content = _readIfExists(configPath);
+    if (content == null) {
+      throw AvdException('config.ini tidak ditemukan untuk "$avdName":\n$configPath');
+    }
+    final document = IniDocument.parse(content);
+    final images = listInstalledSystemImages(sdkRoot);
+    final current = document.get('image.sysdir.1') ?? '';
+    final missing = current.isNotEmpty &&
+        !Directory(p.normalize(p.join(sdkRoot, current))).existsSync();
+    return AvdConfigSnapshot(
+      avdName: avdName,
+      avdDirectory: directory,
+      configPath: configPath,
+      document: document,
+      installedImages: images,
+      currentImageMissing: missing,
+    );
+  }
+
+  String saveAvdConfig({
+    required AvdConfigSnapshot snapshot,
+    required String sdkRoot,
+    required String imageSysdir,
+    required String ramSize,
+    required String storageSize,
+    required String gpuMode,
+    required String cpuCores,
+    DateTime? now,
+    bool Function(String path)? avdIsRunning,
+  }) {
+    final running = avdIsRunning ?? isAvdLockHeld;
+    if (running(snapshot.avdDirectory)) {
+      throw AvdException(
+        'AVD "${snapshot.avdName}" sedang berjalan. Hentikan emulator dulu sebelum mengedit.',
+      );
+    }
+    final image = imageSysdir.trim();
+    final normalizedImage = image.endsWith('\\') || image.endsWith('/')
+        ? image
+        : '${image.replaceAll('/', '\\')}\\';
+    final ram = ramSize.trim();
+    final storage = normalizeStorageSize(storageSize);
+    final gpu = gpuMode.trim();
+    final cores = cpuCores.trim();
+    final validation = validateAvdConfig(
+      ramSize: ram,
+      storageSize: storage,
+      gpuMode: gpu,
+      cpuCores: cores,
+      imageSysdir: normalizedImage,
+      imageExists: (sysdir) =>
+          Directory(p.normalize(p.join(sdkRoot, sysdir))).existsSync(),
+    );
+    if (validation.hasError) {
+      throw AvdException(validation.firstError!);
+    }
+
+    final document = IniDocument.parse(File(snapshot.configPath).readAsStringSync());
+    document.set('image.sysdir.1', normalizedImage);
+    document.set('hw.ramSize', ram);
+    document.set('disk.dataPartition.size', storage);
+    document.set('hw.gpu.mode', gpu);
+    document.set('hw.gpu.enabled', gpu == 'off' ? 'no' : 'yes');
+    document.set('hw.cpu.ncore', cores);
+
+    final backupPath = backupConfigPath(snapshot.configPath, now ?? DateTime.now());
+    File(snapshot.configPath).copySync(backupPath);
+    File(snapshot.configPath).writeAsStringSync(document.encode());
+    return backupPath;
+  }
+
+  List<SystemImage> installedSystemImages(String sdkRoot) =>
+      listInstalledSystemImages(sdkRoot);
+
+  Future<List<String>> listDeviceProfiles({
+    required String sdkRoot,
+    String? avdManagerPath,
+  }) async {
+    final path = (avdManagerPath ?? findAvdManagerPath(sdkRoot)).trim();
+    if (path.isEmpty) {
+      return List<String>.from(kFallbackDeviceProfiles);
+    }
+    final result = await runner.run(
+      path,
+      const ['list', 'device', '-c'],
+      timeout: const Duration(seconds: 30),
+      environment: {
+        'ANDROID_SDK_ROOT': sdkRoot,
+        'ANDROID_HOME': sdkRoot,
+      },
+      runInShell: Platform.isWindows && path.toLowerCase().endsWith('.bat'),
+    );
+    final names = parseDeviceList('${result.stdout}\n${result.stderr}');
+    if (names.isEmpty) {
+      return List<String>.from(kFallbackDeviceProfiles);
+    }
+    return names;
+  }
+
+  Future<void> createAvd({
+    required String sdkRoot,
+    required String name,
+    required String packageId,
+    required String deviceId,
+    required String ramSize,
+    required String storageSize,
+    required String gpuMode,
+    String? avdHome,
+    String? avdManagerPath,
+    Iterable<String> existingNames = const [],
+  }) async {
+    final trimmedName = name.trim();
+    final validation = validateAvdConfig(
+      name: trimmedName,
+      existingNames: existingNames,
+      ramSize: ramSize,
+      storageSize: storageSize,
+      gpuMode: gpuMode,
+      imageSysdir: packageId,
+      requireImage: true,
+      imageExists: (id) {
+        final image = SystemImage.tryParsePackageId(id) ?? SystemImage.tryParseSysdir(id);
+        if (image == null) return false;
+        return Directory(p.join(sdkRoot, image.relativeDir)).existsSync();
+      },
+    );
+    if (validation.hasError) {
+      throw AvdException(validation.firstError!);
+    }
+
+    final manager = (avdManagerPath ?? findAvdManagerPath(sdkRoot)).trim();
+    if (manager.isEmpty) {
+      throw AvdException(avdManagerMissingMessage(sdkRoot));
+    }
+
+    final environment = <String, String>{
+      'ANDROID_SDK_ROOT': sdkRoot,
+      'ANDROID_HOME': sdkRoot,
+      if (avdHome != null && avdHome.trim().isNotEmpty) 'ANDROID_AVD_HOME': avdHome.trim(),
+    };
+    final result = await runner.run(
+      manager,
+      [
+        'create',
+        'avd',
+        '-n',
+        trimmedName,
+        '-k',
+        packageId,
+        '-d',
+        deviceId,
+      ],
+      timeout: const Duration(seconds: 60),
+      environment: environment,
+      runInShell: Platform.isWindows && manager.toLowerCase().endsWith('.bat'),
+      stdin: 'no\n',
+    );
+    if (result.exitCode != 0) {
+      throw AvdException(
+        'Gagal membuat AVD "$trimmedName" (kode ${result.exitCode}).'
+        '${_detail(result)}',
+      );
+    }
+
+    final home = (avdHome ?? '').trim().isNotEmpty
+        ? avdHome!.trim()
+        : p.join(Platform.environment['USERPROFILE'] ?? '', '.android', 'avd');
+    final snapshot = loadAvdConfig(
+      avdName: trimmedName,
+      avdHome: home,
+      sdkRoot: sdkRoot,
+    );
+    saveAvdConfig(
+      snapshot: snapshot,
+      sdkRoot: sdkRoot,
+      imageSysdir: snapshot.imageSysdir.isNotEmpty
+          ? snapshot.imageSysdir
+          : (SystemImage.tryParsePackageId(packageId)?.relativeDirWindows ?? snapshot.imageSysdir),
+      ramSize: ramSize,
+      storageSize: storageSize,
+      gpuMode: gpuMode,
+      cpuCores: snapshot.cpuCores,
+    );
+  }
+
+  Future<void> deleteAvd({
+    required String sdkRoot,
+    required String name,
+    String? avdHome,
+    String? avdManagerPath,
+  }) async {
+    final manager = (avdManagerPath ?? findAvdManagerPath(sdkRoot)).trim();
+    if (manager.isEmpty) {
+      throw AvdException(avdManagerMissingMessage(sdkRoot));
+    }
+    final result = await runner.run(
+      manager,
+      ['delete', 'avd', '-n', name],
+      timeout: const Duration(seconds: 30),
+      environment: {
+        'ANDROID_SDK_ROOT': sdkRoot,
+        'ANDROID_HOME': sdkRoot,
+        if (avdHome != null && avdHome.trim().isNotEmpty) 'ANDROID_AVD_HOME': avdHome.trim(),
+      },
+      runInShell: Platform.isWindows && manager.toLowerCase().endsWith('.bat'),
+    );
+    if (result.exitCode != 0) {
+      throw AvdException(
+        'Gagal menghapus AVD "$name" (kode ${result.exitCode}).'
+        '${_detail(result)}',
+      );
+    }
+  }
+
   Future<String> _readLog(String path) async {
     try {
       final file = File(path);
@@ -244,6 +500,16 @@ class AvdService {
       return await file.readAsString();
     } on FileSystemException {
       return '';
+    }
+  }
+
+  String? _readIfExists(String path) {
+    final file = File(path);
+    if (!file.existsSync()) return null;
+    try {
+      return file.readAsStringSync();
+    } on FileSystemException {
+      return null;
     }
   }
 

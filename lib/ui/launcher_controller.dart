@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/adb_device.dart';
+import '../services/avd_config.dart';
 import '../services/avd_service.dart';
 import '../services/sdk_locator.dart';
 import '../services/settings_store.dart';
@@ -34,9 +35,12 @@ class LauncherController extends ChangeNotifier {
   bool coldBoot = false;
   bool wipeData = false;
   bool noAudio = false;
+  String gpuLaunchMode = 'default';
   bool loading = false;
   bool starting = false;
   bool stopping = false;
+  bool editing = false;
+  bool creating = false;
   String? statusMessage;
   String? errorMessage;
   bool initialized = false;
@@ -56,6 +60,17 @@ class LauncherController extends ChangeNotifier {
       selectedAvd!.isNotEmpty &&
       !starting &&
       !loading;
+
+  bool get canEditSelected =>
+      sdk.isUsable &&
+      selectedAvd != null &&
+      selectedAvd!.isNotEmpty &&
+      !starting &&
+      !loading &&
+      !editing &&
+      !creating;
+
+  bool get canCreateAvd => sdk.isUsable && !loading && !creating && !editing;
 
   Future<void> initialize() async {
     loading = true;
@@ -160,6 +175,11 @@ class LauncherController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setGpuLaunchMode(String value) {
+    gpuLaunchMode = value;
+    notifyListeners();
+  }
+
   Future<void> setManualSdkPath(String? path) async {
     settings = settings.copyWith(sdkPathOverride: path, clearOverride: path == null || path.trim().isEmpty);
     try {
@@ -217,6 +237,7 @@ class LauncherController extends ChangeNotifier {
           coldBoot: coldBoot,
           wipeData: wipeData,
           noAudio: noAudio,
+          gpuMode: gpuLaunchMode,
         ),
       );
       lastEmulatorPid = launch.pid;
@@ -283,6 +304,8 @@ class LauncherController extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? get avdHome => _avdHome;
+
   String? get _avdHome {
     final value = Platform.environment['ANDROID_AVD_HOME']?.trim();
     if (value != null && value.isNotEmpty) return value;
@@ -301,10 +324,115 @@ class LauncherController extends ChangeNotifier {
     return null;
   }
 
+  bool isSelectedAvdRunning() {
+    final name = selectedAvd;
+    final home = _avdHome;
+    if (name == null || home == null || home.isEmpty) return false;
+    return service.isAvdRunning(avdName: name, avdHome: home);
+  }
+
+  AvdConfigSnapshot loadSelectedConfig() {
+    final name = selectedAvd;
+    final home = _avdHome;
+    if (name == null || name.isEmpty) {
+      throw AvdException('Pilih satu virtual device terlebih dahulu.');
+    }
+    if (home == null || home.isEmpty) {
+      throw AvdException('Lokasi folder AVD (ANDROID_AVD_HOME) tidak diketahui.');
+    }
+    return service.loadAvdConfig(
+      avdName: name,
+      avdHome: home,
+      sdkRoot: sdk.root,
+    );
+  }
+
+  Future<String> saveSelectedConfig({
+    required String imageSysdir,
+    required String ramSize,
+    required String storageSize,
+    required String gpuMode,
+    required String cpuCores,
+  }) async {
+    editing = true;
+    errorMessage = null;
+    notifyListeners();
+    try {
+      final snapshot = loadSelectedConfig();
+      final backup = service.saveAvdConfig(
+        snapshot: snapshot,
+        sdkRoot: sdk.root,
+        imageSysdir: imageSysdir,
+        ramSize: ramSize,
+        storageSize: storageSize,
+        gpuMode: gpuMode,
+        cpuCores: cpuCores,
+      );
+      statusMessage = 'Konfigurasi "${snapshot.avdName}" disimpan. Cadangan: $backup';
+      return backup;
+    } catch (error) {
+      errorMessage = error.toString();
+      rethrow;
+    } finally {
+      editing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<List<SystemImage>> installedSystemImages() async {
+    if (sdk.root.isEmpty) return const [];
+    return service.installedSystemImages(sdk.root);
+  }
+
+  Future<List<String>> listDeviceProfiles() async {
+    if (sdk.root.isEmpty) return List<String>.from(kFallbackDeviceProfiles);
+    return service.listDeviceProfiles(sdkRoot: sdk.root);
+  }
+
+  String? get avdManagerPath =>
+      sdk.root.isEmpty ? null : findAvdManagerPath(sdk.root);
+
+  Future<void> createAvd({
+    required String name,
+    required String packageId,
+    required String deviceId,
+    required String ramSize,
+    required String storageSize,
+    required String gpuMode,
+  }) async {
+    creating = true;
+    errorMessage = null;
+    statusMessage = 'Membuat AVD $name…';
+    notifyListeners();
+    try {
+      await service.createAvd(
+        sdkRoot: sdk.root,
+        name: name,
+        packageId: packageId,
+        deviceId: deviceId,
+        ramSize: ramSize,
+        storageSize: storageSize,
+        gpuMode: gpuMode,
+        avdHome: _avdHome,
+        existingNames: avds,
+      );
+      selectedAvd = name.trim();
+      statusMessage = 'AVD "$name" dibuat.';
+      await refresh(showLoading: false, preserveStatus: true);
+    } catch (error) {
+      errorMessage = error.toString();
+      statusMessage = null;
+      rethrow;
+    } finally {
+      creating = false;
+      notifyListeners();
+    }
+  }
+
   void _startPeriodicRefresh() {
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (loading || starting || stopping) return;
+      if (loading || starting || stopping || editing || creating) return;
       unawaited(refresh(showLoading: false, preserveStatus: true));
     });
   }

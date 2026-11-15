@@ -6,7 +6,7 @@ import 'package:avd_launcher/ui/launcher_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('menampilkan judul dan tombol Mulai', (tester) async {
+  testWidgets('menampilkan judul, Mulai, Edit AVD, dan Buat AVD baru', (tester) async {
     final controller = LauncherController(
       settingsStore: SettingsStore(filePath: 'settings-test-unused.json'),
       service: AvdService(),
@@ -16,5 +16,8 @@ void main() {
     expect(find.text('AVD Launcher'), findsOneWidget);
     expect(find.text('Mulai'), findsOneWidget);
     expect(find.text('Deteksi otomatis'), findsOneWidget);
+    expect(find.text('Edit AVD'), findsOneWidget);
+    expect(find.text('Buat AVD baru'), findsOneWidget);
+    expect(find.text('Mode GPU saat dijalankan'), findsOneWidget);
   });
 }
