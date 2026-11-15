@@ -339,8 +339,31 @@ String backupConfigPath(String configPath, DateTime timestamp) {
 }
 
 bool isFileLockHeld(String path) {
+  final type = FileSystemEntity.typeSync(path);
+  if (type == FileSystemEntityType.notFound) return false;
+
+  if (type == FileSystemEntityType.directory) {
+    final dir = Directory(path);
+    final pidFile = File(p.join(path, 'pid'));
+    if (pidFile.existsSync()) {
+      try {
+        final pidText = pidFile.readAsStringSync().trim();
+        final pid = int.tryParse(pidText);
+        if (pid != null && pid > 0) {
+          final alive = _isPidRunningSync(pid);
+          if (alive) return true;
+        }
+      } catch (_) {}
+    }
+    try {
+      dir.deleteSync(recursive: true);
+      return false;
+    } on FileSystemException {
+      return true;
+    }
+  }
+
   final file = File(path);
-  if (!file.existsSync()) return false;
   if (Platform.isWindows) {
     try {
       // On Windows, Android Emulator opens its .lock files without FILE_SHARE_DELETE.
@@ -368,10 +391,35 @@ bool isFileLockHeld(String path) {
   }
 }
 
+bool _isPidRunningSync(int pid) {
+  if (pid <= 0) return false;
+  try {
+    if (Platform.isWindows) {
+      final result = Process.runSync('tasklist', [
+        '/FI',
+        'PID eq $pid',
+        '/FO',
+        'CSV',
+        '/NH',
+      ]);
+      final out = result.stdout is String
+          ? result.stdout as String
+          : result.stdout.toString();
+      return out.contains('"$pid"');
+    }
+    final result = Process.runSync('ps', ['-p', '$pid', '-o', 'pid=']);
+    return result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty;
+  } catch (_) {
+    return false;
+  }
+}
+
 bool isAvdLockHeld(String avdDirectory) {
-  // Check hardware-qemu.ini.lock first; only check multiinstance.lock if needed,
-  // and never create files that do not exist.
-  const names = ['hardware-qemu.ini.lock', 'multiinstance.lock'];
+  const names = [
+    'hardware-qemu.ini.lock',
+    'multiinstance.lock',
+    'userdata-qemu.img.lock',
+  ];
   var locked = false;
   for (final name in names) {
     if (isFileLockHeld(p.join(avdDirectory, name))) {

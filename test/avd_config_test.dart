@@ -147,4 +147,20 @@ void main() {
       r'E:\Android\Sdk\emulator\emulator.exe -avd Pixel_10_Pro_Fold',
     );
   });
+
+  test('isAvdLockHeld membersihkan direktori .lock yatim dengan pid yang sudah mati', () {
+    final root = Directory.systemTemp.createTempSync('avd_launcher_lock_');
+    addTearDown(() {
+      if (root.existsSync()) root.deleteSync(recursive: true);
+    });
+    final lockDir = Directory(p.join(root.path, 'hardware-qemu.ini.lock'))
+      ..createSync();
+    File(p.join(lockDir.path, 'pid')).writeAsStringSync('9999999');
+    final multiFile = File(p.join(root.path, 'multiinstance.lock'))
+      ..writeAsStringSync('');
+
+    expect(isAvdLockHeld(root.path), isFalse);
+    expect(lockDir.existsSync(), isFalse);
+    expect(multiFile.existsSync(), isFalse);
+  });
 }

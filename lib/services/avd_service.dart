@@ -465,7 +465,7 @@ class AvdService {
   }
 
   /// Cleans up stale `.lock`, `bootcompleted.ini`, and `snapshot.trace` files
-  /// in the AVD directory if no running emulator holds the lock.
+  /// or directories in the AVD directory if no running emulator holds the lock.
   void cleanupStaleAvdFiles({
     required String avdName,
     required String avdHome,
@@ -478,17 +478,25 @@ class AvdService {
     if (isAvdLockHeld(directory)) {
       return;
     }
-    const staleFiles = [
+    const staleItems = [
       'hardware-qemu.ini.lock',
       'multiinstance.lock',
+      'userdata-qemu.img.lock',
       'bootcompleted.ini',
       'snapshot.trace',
     ];
-    for (final name in staleFiles) {
-      final file = File(p.join(directory, name));
-      if (file.existsSync()) {
+    for (final name in staleItems) {
+      final itemPath = p.join(directory, name);
+      final type = FileSystemEntity.typeSync(itemPath);
+      if (type == FileSystemEntityType.file) {
         try {
-          file.deleteSync();
+          File(itemPath).deleteSync();
+        } on FileSystemException {
+          // ignore if locked or inaccessible
+        }
+      } else if (type == FileSystemEntityType.directory) {
+        try {
+          Directory(itemPath).deleteSync(recursive: true);
         } on FileSystemException {
           // ignore if locked or inaccessible
         }
@@ -698,6 +706,10 @@ class AvdService {
     String? avdHome,
     String? avdManagerPath,
   }) async {
+    final trimmedHome = (avdHome ?? '').trim();
+    if (trimmedHome.isNotEmpty) {
+      cleanupStaleAvdFiles(avdName: name, avdHome: trimmedHome);
+    }
     final manager = (avdManagerPath ?? findAvdManagerPath(sdkRoot)).trim();
     if (manager.isEmpty) {
       throw AvdException(avdManagerMissingMessage(sdkRoot));
@@ -709,7 +721,7 @@ class AvdService {
       environment: {
         'ANDROID_SDK_ROOT': sdkRoot,
         'ANDROID_HOME': sdkRoot,
-        if (avdHome != null && avdHome.trim().isNotEmpty) 'ANDROID_AVD_HOME': avdHome.trim(),
+        if (trimmedHome.isNotEmpty) 'ANDROID_AVD_HOME': trimmedHome,
       },
       runInShell: Platform.isWindows && manager.toLowerCase().endsWith('.bat'),
     );
