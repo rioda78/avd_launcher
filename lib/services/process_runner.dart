@@ -63,6 +63,11 @@ abstract class ProcessRunner {
 
   /// True if a local TCP port is in LISTENING state (from netstat).
   Future<bool> isLocalPortListening(int port);
+
+/// Lines of `pid|processName|commandLine` for emulator/qemu processes.
+  Future<String> listHostEmulatorProcessLines();
+
+  Future<void> killProcess(int pid);
 }
 
 class RealProcessRunner implements ProcessRunner {
@@ -278,5 +283,34 @@ if (\$titles) { \$titles[0].MainWindowTitle }
     if (out.contains(':$port ')) return true;
     final fallback = await Process.run('netstat', ['-lnt']);
     return fallback.stdout.toString().contains(':$port ');
+  }
+
+  @override
+  Future<String> listHostEmulatorProcessLines() async {
+    if (!Platform.isWindows) {
+      return '';
+    }
+    const script = r'''
+$ErrorActionPreference = 'SilentlyContinue'
+Get-CimInstance Win32_Process -Filter "Name='emulator.exe' OR Name='qemu-system-x86_64.exe'" |
+  ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.Name, $_.CommandLine }
+''';
+    final result = await Process.run(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      stdoutEncoding: const SystemEncoding(),
+      stderrEncoding: const SystemEncoding(),
+    );
+    return result.stdout.toString();
+  }
+
+  @override
+  Future<void> killProcess(int pid) async {
+    if (pid <= 0) return;
+    if (Platform.isWindows) {
+      await Process.run('taskkill', ['/PID', '$pid', '/F', '/T']);
+      return;
+    }
+    await Process.run('kill', ['-9', '$pid']);
   }
 }

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import '../models/adb_device.dart';
 import 'avd_config.dart';
 import 'emulator_diagnostics.dart';
+import 'emulator_process.dart';
 import 'output_parser.dart';
 import 'launch_watch.dart';
 import 'process_runner.dart';
@@ -506,10 +507,8 @@ class AvdService {
     if (isAvdLockHeld(directory)) {
       return;
     }
+    backupAndCleanupStaleLocks(directory);
     const staleItems = [
-      'hardware-qemu.ini.lock',
-      'multiinstance.lock',
-      'userdata-qemu.img.lock',
       'bootcompleted.ini',
       'snapshot.trace',
     ];
@@ -530,6 +529,117 @@ class AvdService {
         }
       }
     }
+  }
+
+  /// Copies stale `*.lock` items to a timestamped folder, then deletes them.
+  /// Returns the backup path, or null if nothing was moved or a lock is held.
+  String? backupAndCleanupStaleLocks(String avdDirectory, {DateTime? now}) {
+    if (isAvdLockHeld(avdDirectory)) return null;
+    final existing = <String>[];
+    for (final name in kStaleLockNames) {
+      final itemPath = p.join(avdDirectory, name);
+      final type = FileSystemEntity.typeSync(itemPath, followLinks: false);
+      if (type == FileSystemEntityType.file ||
+          type == FileSystemEntityType.directory) {
+        existing.add(itemPath);
+      }
+    }
+    try {
+      final dir = Directory(avdDirectory);
+      if (dir.existsSync()) {
+        for (final entity in dir.listSync()) {
+          if (p.basename(entity.path).toLowerCase().endsWith('.lock') &&
+              !existing.contains(entity.path)) {
+            existing.add(entity.path);
+          }
+        }
+      }
+    } on FileSystemException {
+      // ignore listing errors; still handle the known names
+    }
+    if (existing.isEmpty) return null;
+    final backupDir = Directory(staleLockBackupDirectory(avdDirectory, now ?? DateTime.now()));
+    backupDir.createSync(recursive: true);
+    for (final itemPath in existing) {
+      final dest = p.join(backupDir.path, p.basename(itemPath));
+      try {
+        final type = FileSystemEntity.typeSync(itemPath, followLinks: false);
+        if (type == FileSystemEntityType.directory) {
+          _copyDir(itemPath, dest);
+          Directory(itemPath).deleteSync(recursive: true);
+        } else if (type == FileSystemEntityType.file) {
+          File(itemPath).copySync(dest);
+          File(itemPath).deleteSync();
+        }
+      } on FileSystemException {
+        // leave the item if it cannot be moved
+      }
+    }
+    return backupDir.path;
+  }
+
+  void _copyDir(String source, String dest) {
+    final src = Directory(source);
+    Directory(dest).createSync(recursive: true);
+    for (final entity in src.listSync()) {
+      final target = p.join(dest, p.basename(entity.path));
+      if (entity is Directory) {
+        _copyDir(entity.path, target);
+      } else if (entity is File) {
+        entity.copySync(target);
+      }
+    }
+  }
+
+  Future<List<HostEmulatorProcess>> listHostEmulatorProcesses() async {
+    final output = await runner.listHostEmulatorProcessLines();
+    return parseHostEmulatorProcessLines(output);
+  }
+
+  Future<List<HostEmulatorProcess>> listProcessesForAvd(String avdName) async {
+    final all = await listHostEmulatorProcesses();
+    return processesForAvd(all, avdName);
+  }
+
+  Future<List<HostEmulatorProcess>> listHungProcessesForAvd(String avdName) async {
+    final matches = await listProcessesForAvd(avdName);
+    if (matches.isEmpty) return const [];
+    final portOpen = await isEmulatorAdbPortOpen();
+    final hung = <HostEmulatorProcess>[];
+    for (final proc in matches) {
+      var window = false;
+      try {
+        window = await runner.processTreeHasVisibleWindow(proc.pid);
+      } catch (_) {}
+      if (!window && !portOpen) {
+        hung.add(proc);
+      }
+    }
+    return hung;
+  }
+
+  /// Stops hung emulator/qemu processes for [avdName] (no window and no adb ports).
+  /// Does not stop a process that still has a visible emulator window.
+  Future<List<int>> killHungProcessesForAvd(String avdName) async {
+    final hung = await listHungProcessesForAvd(avdName);
+    final killed = <int>[];
+    for (final proc in hung) {
+      await runner.killProcess(proc.pid);
+      killed.add(proc.pid);
+    }
+    return killed;
+  }
+
+  bool hasIncompleteQuickbootSnapshot({
+    required String avdName,
+    required String avdHome,
+  }) {
+    final directory = resolveAvdDirectory(
+      avdName: avdName,
+      avdHome: avdHome,
+      readFileIfExists: _readIfExists,
+    );
+    return avdHasIncompleteQuickbootSnapshot(directory);
   }
 
   AvdConfigSnapshot loadAvdConfig({

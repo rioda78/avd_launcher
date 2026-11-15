@@ -47,8 +47,8 @@ AdbWatchAssessment assessAdbWatchTimeout({
   return AdbWatchAssessment(
     errorMessage:
         'Proses emulator masih berjalan, tetapi jendela perangkat tidak muncul dan adb tidak melihatnya '
-        '(port 5554/5555 tidak terbuka). Prosesnya mungkin macet saat start. Lihat log. '
-        'Hentikan proses itu secara manual jika perlu, lalu coba Mulai lagi.\n'
+        '(port 5554/5555 tidak terbuka). Prosesnya mungkin macet saat start, sering karena snapshot quickboot rusak. '
+        'Tekan Hentikan proses macet, lalu coba Mulai dengan Boot dingin (-no-snapshot-load). Snapshot tidak dihapus.\n'
         'Log: $logPath',
   );
 }

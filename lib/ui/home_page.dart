@@ -720,16 +720,30 @@ class _OptionsCard extends StatelessWidget {
               alignment: Alignment.centerRight,
               child: Padding(
                 padding: const EdgeInsets.only(right: 8),
-                child: FilledButton.icon(
-                  onPressed: controller.canStart ? () => _start(context) : null,
-                  icon: controller.starting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.play_arrow),
-                  label: const Text('Mulai'),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.end,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: controller.canKillHungProcesses
+                          ? () => _killHung(context)
+                          : null,
+                      icon: const Icon(Icons.stop_circle_outlined),
+                      label: const Text('Hentikan proses macet'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: controller.canStart ? () => _start(context) : null,
+                      icon: controller.starting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.play_arrow),
+                      label: const Text('Mulai'),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -739,32 +753,88 @@ class _OptionsCard extends StatelessWidget {
     );
   }
 
+  Future<void> _killHung(BuildContext context) async {
+    await controller.killHungProcessesForSelected();
+    if (!context.mounted) return;
+    final text = controller.errorMessage ??
+        controller.statusMessage ??
+        'Proses macet diproses.';
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
   Future<void> _start(BuildContext context) async {
-    if (controller.wipeData) {
-      final confirmed = await showDialog<bool>(
+    if (controller.hasIncompleteQuickbootForSelected() && !controller.coldBoot) {
+      final choice = await showDialog<String>(
         context: context,
         builder: (context) {
           return AlertDialog(
-            title: const Text('Hapus data AVD?'),
-            content: Text(
-              'Data di dalam "${controller.selectedAvd}" akan dihapus sebelum emulator dijalankan. Lanjutkan?',
+            title: const Text('Snapshot quickboot tidak lengkap'),
+            content: const Text(
+              'Snapshot default_boot tampak kotor atau tidak lengkap '
+              '(misalnya ram.img.dirty atau snapshot.pb yang terlalu kecil). '
+              'Boot biasa bisa macet tanpa jendela perangkat. '
+              'Snapshot tidak dihapus. Disarankan boot dingin (-no-snapshot-load).',
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
+                onPressed: () => Navigator.of(context).pop('cancel'),
                 child: const Text('Batal'),
               ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop('normal'),
+                child: const Text('Lanjut tanpa boot dingin'),
+              ),
               FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Hapus dan jalankan'),
+                onPressed: () => Navigator.of(context).pop('cold'),
+                child: const Text('Boot dingin'),
               ),
             ],
           );
         },
       );
+      if (choice == null || choice == 'cancel') return;
+      if (choice == 'cold') {
+        if (controller.wipeData) {
+          if (!context.mounted) return;
+          final confirmed = await _confirmWipe(context);
+          if (confirmed != true) return;
+        }
+        await controller.startSelected(coldBootOverride: true);
+        return;
+      }
+    }
+    if (controller.wipeData) {
+      if (!context.mounted) return;
+      final confirmed = await _confirmWipe(context);
       if (confirmed != true) return;
     }
     await controller.startSelected();
+  }
+
+  Future<bool?> _confirmWipe(BuildContext context) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Hapus data AVD?'),
+          content: Text(
+            'Data di dalam "${controller.selectedAvd}" akan dihapus sebelum emulator dijalankan. Lanjutkan?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Hapus dan jalankan'),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
 

@@ -424,7 +424,77 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
-  Future<void> startSelected() async {
+
+  bool get canKillHungProcesses =>
+      sdk.isUsable &&
+      selectedAvd != null &&
+      selectedAvd!.isNotEmpty &&
+      !starting &&
+      !loading &&
+      !stopping &&
+      !editing &&
+      !creating &&
+      !deleting;
+
+  bool hasIncompleteQuickbootForSelected() {
+    final name = selectedAvd;
+    final home = _avdHome;
+    if (name == null || name.isEmpty || home == null || home.isEmpty) {
+      return false;
+    }
+    try {
+      return service.hasIncompleteQuickbootSnapshot(avdName: name, avdHome: home);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> killHungProcessesForSelected() async {
+    final name = selectedAvd;
+    if (name == null || name.isEmpty) {
+      errorMessage = 'Pilih satu virtual device terlebih dahulu.';
+      notifyListeners();
+      return;
+    }
+    stopping = true;
+    errorMessage = null;
+    statusMessage = 'Menghentikan proses macet untuk $name…';
+    notifyListeners();
+    try {
+      final killed = await service.killHungProcessesForAvd(name);
+      await Future<void>.delayed(const Duration(seconds: 1));
+      String? backup;
+      final home = _avdHome;
+      if (home != null && home.isNotEmpty) {
+        final directory = resolveAvdDirectory(
+          avdName: name,
+          avdHome: home,
+          readFileIfExists: (path) {
+            final file = File(path);
+            return file.existsSync() ? file.readAsStringSync() : null;
+          },
+        );
+        backup = service.backupAndCleanupStaleLocks(directory);
+      }
+      if (killed.isEmpty) {
+        statusMessage = 'Tidak ada proses macet untuk "$name".';
+      } else {
+        statusMessage =
+            'Proses macet dihentikan (PID ${killed.join(', ')}).'
+            '${backup == null ? '' : ' Cadangan lock: $backup'} '
+            'Jika Mulai masih macet, aktifkan Boot dingin. Snapshot tidak dihapus.';
+      }
+      await refresh(showLoading: false, preserveStatus: true, includeAvdList: false);
+    } catch (error) {
+      errorMessage = 'Gagal menghentikan proses macet: $error';
+      statusMessage = null;
+    } finally {
+      stopping = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> startSelected({bool? coldBootOverride}) async {
     if (!canStart) {
       if (!sdk.isUsable) {
         errorMessage = sdk.errorMessage.isNotEmpty
@@ -449,6 +519,20 @@ class LauncherController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    try {
+      final hung = await service.listHungProcessesForAvd(targetAvd);
+      if (hung.isNotEmpty) {
+        errorMessage =
+            'Ada ${hung.length} proses emulator macet untuk "$targetAvd" (tanpa jendela dan tanpa port adb). '
+            'Tekan Hentikan proses macet, lalu coba Mulai lagi. '
+            'Jika masih gagal, aktifkan Boot dingin — snapshot quickboot mungkin rusak (snapshot tidak dihapus).';
+        starting = false;
+        notifyListeners();
+        return;
+      }
+    } catch (_) {
+      // If process listing fails, continue and let startAvd try.
+    }
     final previousEmulatorSerials = devices
         .where((device) => device.isEmulator)
         .map((device) => device.serial)
@@ -464,7 +548,7 @@ class LauncherController extends ChangeNotifier {
         avdHome: _avdHome,
         logDirectory: _logDirectory,
         options: LaunchOptions(
-          coldBoot: coldBoot,
+          coldBoot: coldBootOverride ?? coldBoot,
           wipeData: wipeData,
           noAudio: noAudio,
           gpuMode: gpuLaunchMode,
